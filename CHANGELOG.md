@@ -2,6 +2,310 @@
 
 Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by release; full history via `git log`.
 
+## Unreleased
+
+## v2.3.0 — Get started, the Gemini API, ledger retention, early warnings, a new Neighbourhood
+
+A fresh ezllm now walks you to a working request in three steps, and the dashboard uses
+plain words with advanced settings folded away. Apps written for Google's Gemini API can
+point at ezllm. Old calls can roll up into daily totals. The bell warns before a quota,
+balance or cookie runs out, and says each warning once. The Neighbourhood is redesigned
+to show what is failing at a glance.
+
+**Before you upgrade:** the database moves to schema 39, and an older ezllm refuses to
+open it. Back up first. `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired and stops the boot:
+remove it. See [docs/upgrading.md](docs/upgrading.md).
+
+- **Smoother page changes.** Switching pages mounted the new page twice, so it loaded
+  its data twice and could drop what you had just done. It now mounts once and rises in.
+- **Dialogs open with their values.** A key's **Policy** dialog and the combo, rule and
+  compression-profile editors showed one frame of empty fields first, so **Save** was
+  briefly on, a copy briefly had no name, and Escape could ask to discard edits nobody
+  made.
+- **Chat** keeps following a stream when the column gets shorter, instead of drifting
+  off the bottom and offering **Jump to latest**.
+- **Dashboard tests**: the four page tests left out of CI run again.
+- **Neighbourhood, redesigned.** The city now tells the truth at a glance. Height is
+  tokens per minute on a linear scale with a ruler (full height is the busiest
+  provider, or a ceiling you set). Lit windows are calls that worked and red windows
+  are calls that failed. A failing provider gets a red sign, a beacon and rain, and
+  stands in the front row; switched-off providers stand at the back. Every building
+  has a sign with its number, and signs never overlap. Each live request is a car,
+  red if it failed. **Status** mode is plain, for a screen left open; **Show** mode
+  adds the night sky over the same numbers. One line at the top says whether anything
+  is failing; the details card appears when you select a building; on a phone the
+  table becomes cards. Design: `docs/design/neighbourhood-design.md`.
+- **Neighbourhood**: a table row's **Requests** link now opens that provider's requests.
+  It filtered by the provider's name, so it showed nothing when the name and the
+  provider ID differ.
+- **Dashboard tests**: 29 more page tests run in CI. The stale ones now match the
+  current pages; `ranges`, `stats`, `preset-labels` and `theme` run on fixtures instead
+  of a live instance.
+- **Quieter warnings.** A low balance is said once each time it drops under your
+  threshold, not every day it stays there, and an empty balance reads 0.00, not -0.00.
+  A provider whose usage page refuses its sign-in is said once in the bell ("Can't read
+  … usage: its sign-in was refused") and isn't read again until you change its settings
+  or key; the log names the status, not the provider's reply.
+- **Get started with a subscription.** Step 1 asks how you pay: **I have an API key** or
+  **I have a subscription**. With a subscription, each plan (Claude Pro/Max, ChatGPT
+  Plus/Pro, GitHub Copilot, Google Antigravity) shows where it stands. A ready plan
+  connects in one click, with no key. One that isn't signed in shows its sign-in
+  command. One that isn't set up names the setting that turns it on and links the steps
+  for your version, with **Check again** for when you're done.
+- **More.** The sidebar puts what you need to route a request first (Dashboard,
+  Providers, Combos, Connect, Analytics) and the extras under **More** (Compression,
+  Rules, Services, Chat, Neighbourhood), each marked "in use" once it is. An extra that
+  isn't set up opens with a short note on what it does, when it's worth it and one way
+  to start. Once Get started is done, the Dashboard shows **What else ezllm does** until
+  you close it. With no compression profiles, requests skip the compression lookups
+  entirely and go out exactly as your app sent them.
+- **Connect.** The address and client setup come first. Keys are one row each, and a
+  long list shows the first ten with **Show all**; search still looks through every key.
+- **Plain words, and Advanced.** The dashboard uses one word per idea: provider, provider
+  ID, provider key, app key, API, converted, test, paused (with **Resume**). Combos list
+  models in an order, **In order** by default. A provider's models show one status each
+  (Works, Not tested, Doesn't work); results per API, **Force API** and **Test all
+  models** sit behind an **Advanced** switch. Add provider asks for a name, a type and a
+  key; the provider ID and the rest fold under **Advanced**, as do a combo's order,
+  compression and context size. The API keeps its field names. The words are listed in
+  [docs/glossary.md](docs/glossary.md).
+- **Get started.** A new ezllm opens a three-step page after the password is set: pick a
+  provider and paste its key, create a key for your app, send a test request with that
+  key. It ends with the settings to paste into your app. The Dashboard shows "Finish
+  setting up" until all three are done. The setup screen now shows where to find the code.
+- **Faster provider list.** The provider list and the overview read keys, quotas and
+  model counts for every provider in three queries, instead of three per provider.
+- **Gemini API surface.** Apps written for Google's Gemini API can point at ezllm:
+  `/v1beta/models/{model}:generateContent`, `:streamGenerateContent` (SSE or JSON array),
+  `:countTokens` and `/v1beta/models`, with function calling. Requests run through the
+  normal routing, rules and ledger. The key goes in `x-goog-api-key`; the `?key=` form
+  is off unless you turn it on in Settings, behind a warning, because URLs end up in logs.
+- **Ledger retention.** Settings → Backup & Recovery → **Keep every call for** caps how
+  long single calls are kept (off by default; 32 days or more). Older calls are added
+  into daily totals per provider, model, key and app, then deleted, so charts, costs and
+  token totals do not change. Database schema 39 adds the daily totals table.
+- **Import a configuration.** Settings → Backup & Recovery → **Import configuration**
+  reads an export from another ezllm, lists what it would create or change, and applies
+  it when you say so. Providers already here keep their keys; new ones arrive turned
+  off, ready for a key. Combos, compression profiles, rules and settings come along.
+  `POST /admin/import` (`?dry_run=true` for the plan).
+- **Early warnings.** The bell (and your push channels) now says when a provider has
+  used 80% of a quota window, when a prepaid balance drops under 2, and when a pasted
+  session cookie expires within 48 hours. Each is said once per window, day or cookie,
+  and each has a switch and a threshold in Settings → Notifications. An hourly check
+  reads every enabled provider's quota for this; readings older than 30 days are pruned.
+- **Every key of a provider is used.** A provider with several keys now takes turns:
+  each request starts on the next key. A `429` or a refused key (`401`, `403`) parks only
+  that key for that model, and the request moves straight on to the next key. A server
+  error is not retried on the other keys. The provider shows **parked** only when every
+  key is; until then its card reads "1 of 2 keys parked". `GET /admin/cooldowns` names
+  the key, and route explain reports `key_count`.
+- **Export to CSV or JSON.** Requests downloads the rows it shows, and Token Economics
+  its spend by day, provider and model. Text that could run as a spreadsheet formula is
+  neutralised.
+- **Quick jump.** Ctrl+K (⌘K on a Mac), or **Jump to…** in the sidebar, opens a palette
+  of every page, the Settings tabs and the common "new …" actions. Type to filter,
+  Enter to go. `/providers?add=1` opens Add provider.
+- **Rule groups save in one step.** Editing, turning off or deleting a rule group is one
+  transaction, however many models it holds: every rule changes or none does. It was
+  one request per model, so a failure halfway left some rules changed. New `POST
+  /admin/model-rules/batch`.
+- **Explain a route.** **Explain** on a combo shows what a request would do right now,
+  hop by hop: tried, skipped and why (turned off, disabled account, missing model, a
+  rule, a park, too little context, no tools), translated or native, and whether a
+  chosen key may call it at all. Nothing is sent to a provider. New `POST
+  /admin/route-explain`.
+- **Rotate the master key, create keys from the command line.** `ezllm
+  rotate-master-key` re-encrypts every stored secret under a new key in one step and
+  swaps the key file, keeping the old one until you delete it; any failure changes
+  nothing. `ezllm token create --name NAME` makes a client key and prints it once.
+- **Services page loads gently.** Provider catalogs load four at a time instead of
+  all at once; models still appear as each provider answers.
+- **Unpark now.** Parked providers show **parked** with a live countdown on their
+  Providers card and on the Combos hop. **Unpark** sends them traffic again at once,
+  after you fix the cause. New `GET|DELETE /admin/cooldowns`.
+- **Compression per key.** A key can carry its own compression profile (Connect → key
+  policy). It applies to that key's requests on every route, direct `namespace/model`
+  calls included; a request's `x-ezllm-compression` header still wins, and a combo's
+  profile applies when the key has none.
+- **One model by id.** `GET /v1/models/{model}` returns that model's entry, so SDKs
+  and IDE plugins that check a configured model at startup no longer get a 404.
+  Anthropic clients get Anthropic's shape.
+- **Release check.** ezllm asks GitHub once a day for its latest release and says
+  when a newer one is out: the sidebar version becomes a pill, Settings → System
+  names the release, and the bell rings once per version. On by default;
+  `update_check` in Settings or `EZLLM_UPDATE_CHECK=off` turns it off. New
+  `GET /admin/update`; `/healthz` is unchanged.
+- **Bridge updates one CLI at a time.** The updater swaps, restarts, proves and, if
+  needed, restores each bridge on its own. A failure in one no longer undoes the
+  others. Expect one restart per updated bridge instead of one shared restart.
+  A temporary failure after the switch is tested once more before it is undone.
+- **Antigravity plan limits.** The provider card and Quota dialog show how much of each
+  weekly limit is used, per group of models, read with `agy -p /usage` (no quota spent).
+- **Dashboard fixes.** Links in chat answers open only when they are `http`, `https`
+  or `mailto`. The chat model picker lists combos. Neighbourhood buildings take their
+  totals from their own account, so two keys with the same hint no longer double the
+  traffic, and "View requests" filters by namespace. Connect shows a capped key's use
+  in its current calendar bucket (the number the cap enforces) and counts the spend
+  cap; `GET /admin/tokens` now carries `cap_used` and `spent_usd` for capped keys. A
+  hand-set model verdict has a Release button. The Console cookie field appears for
+  Claude Platform, and credential fields follow the base URL. Savings read only
+  rewrites that shipped. Opening a link in a new tab no longer asks for the password
+  again, and the live feed stops retrying after the session ends. Other fixes: allowlist
+  globs match the server, feed rows no longer drop same-second calls, token tooltips say
+  whether cached tokens are inside, Stats links through by client and combo, every
+  notification opens its page, the model picker closes when you tab away, binary chat
+  attachments are refused, the ratio floor goes down to 0%, and undefined colours are
+  fixed.
+- **Compression, backup and logging fixes.** A caveman rule at standard intensity
+  wrote a literal `$1` into prompts in place of punctuation ("Hello.  World" became
+  "Hello$1 World"); the rule is removed, and the pack loader now refuses any
+  replacement with a capture reference. A message that mentions ``` mid-sentence no
+  longer turns compression off for the whole conversation: the fence check now asks
+  whether a rewrite unbalanced a message, across tool results and Responses items
+  too. The session memo keeps a conversation's opening messages when its cap is
+  reached. The rule-length gate measures the true shortest match. Progress bars
+  redrawn with an erase-line no longer leave the old bar's tail. Backups no longer
+  fail on filesystems that cannot flush a directory. Log messages escape newlines and
+  terminal escapes. Combo `sticky_idle_s: 0` ("never release on idle") can be saved
+  with PATCH. The Codex bridge logs readable lines, and a template folder it cannot
+  remove no longer costs a template slot.
+- **Faster compression and uploads.** Caveman's span protection skips patterns whose
+  characters are absent: 4.3 times faster on plain prose (10.6 to 2.45 ms on 18 KB).
+  Sizing the conversation between stages no longer builds a JSON copy each time, and
+  the session memo hashes each message once instead of three times: a four-stage run
+  on a 360 KB conversation is 14% faster and allocates 27% less. Swapping the model in
+  a 25 MiB multipart upload uses 32 MB instead of 87 MB. The database refreshes its
+  query statistics when ezllm stops. Caveman skips a rule when the words it needs are
+  absent: with the other changes, that four-stage run went from 642 to 205 ms.
+- **Audio and video stream through.** Speech, video and other binary answers reach
+  the client as they arrive instead of after the whole file is generated and held in
+  memory. A file cut off mid-way is recorded as truncated.
+- **Codex and Copilot bridge fixes.** The Copilot bridge starts its CLI in its own
+  process group and ends the whole group, so nothing the CLI started outlives a
+  cancelled turn or a stopped worker. Codex's `--help` check matches whole flags, so
+  `--sandbox` is no longer found inside `--sandbox-policy`. Copilot error details are
+  cut on a character boundary.
+- **Claude and Antigravity bridge fixes.** A Claude Code CLI that stops without an
+  answer is now a 502 with its own words, not a 200 with an empty message. Ending a CLI
+  no longer looks up its process group after the CLI is gone, so a recycled process id
+  cannot be killed by mistake. A Claude conversation keeps its session id when the client
+  moves its cache marker, so the cached prefix survives turn 2. The Claude and
+  Antigravity bridges log readable lines again. The bridges accept `bearer` in any case
+  and refuse a token sent without the scheme. Antigravity plan-usage reads run one at a
+  time and are reused for 30 seconds, instead of starting a CLI per refresh. An
+  Antigravity answer whose deltas stop short streams the rest. Output too large to read
+  is reported as such. The `--help` flag check tolerates small format changes.
+  A non-streaming Claude reply names the stop sequence that ended it.
+- **Provider fixes.** claude-web answers that stream longer than 60 seconds are no
+  longer cut off: the timeout now covers only the wait for the first response. A
+  claude-web answer that is a tool call fails with `chat_tools_unsupported`, so a combo
+  moves on, instead of ending as an empty answer. claude-web reads `deflate` answers,
+  releases its zstd decoders, uses the organization the browser marks active, and sends
+  `UTC` when the host has no named timezone. Probing an OpenAI reasoning model no longer
+  marks it as not speaking chat because it refused `max_tokens`. Gemini's per-minute limit
+  reads as `rate_limited`, not `quota_exhausted`. "reasoning_effort is not allowed" is no
+  longer learned as "reasoning required". A query string reaches the claude-web and
+  gemini-web bridges intact. A key test sends an account's custom headers exactly as
+  live requests do. gemini-web's request counter no longer goes negative after about
+  21,000 requests.
+- **Routing and rules fixes.** At start-up, one rule with a timezone that does not
+  resolve no longer leaves every rule off: the valid ones load and the bad one is
+  logged. When every combo hop is skipped and one was refused by a rule, the client
+  gets 429 with when to retry, not 502. `next_allowed` skips days a window does not
+  allow. Accounts without a rate limit no longer take a global lock on every request.
+- **Translation fixes.** A field sent as `null` is treated as left out: SDKs send unset
+  options that way, and `max_tokens`, `temperature` and `top_p` became 0, parallel tool
+  calls turned off, and `tool_choice: null` failed the request. A failed tool result
+  (`is_error`) keeps its failure, as `[tool error]`, instead of reading as empty success.
+  Images reach `responses_models` hops as `input_image` inside a user message. Text after
+  a tool call in a chat stream no longer aborts the answer. A tool-call-only assistant
+  turn sends `content: null`. Image data URIs without `;base64` are read correctly.
+- **Proxy fixes.** Client-address and browser headers (`X-Forwarded-For`, `X-Real-IP`,
+  `Forwarded`, `Cf-Connecting-IP`, `Referer`, `Sec-Fetch-*`) no longer reach providers.
+  An upstream error sent as a stream on a translated hop reaches the client as its own
+  error, not run through the stream translator, and an error after a broken stream
+  starts on its own line. `408`/`425` use the server-error cooldown. Gemini audio over
+  32 MiB is refused instead of cut. Model IDs are escaped in Cloudflare and Gemini URLs,
+  and Cloudflare is recognised by host. A later zero no longer wipes an output token
+  count. When every hop is too small for the request, the error says so instead of
+  "five-minute cooldown".
+- **Store fixes.** Turning an account off in the dashboard (or any partial account
+  `PATCH`) used to wipe its custom headers, token cap, context size, quota mode and cap
+  window; it keeps them now, and a `PATCH` is validated like a new account. A rule's
+  `+08:00` timezone works; it used to drop the rule or count in UTC. Changing a rule's
+  model moves the rule. Passwords over 72 bytes get a clear 400 instead of a 500. A new
+  account never reuses a deleted one's id, and deleting an account clears its usage
+  counters. Negative upstream token counts read as 0. A management key that cannot be
+  decrypted is dropped instead of sent upstream. The web providers drop `developer`
+  messages like `system` ones and refuse images instead of ignoring them.
+- **Admin API fixes.** A rule `PATCH` changes only the fields sent; `{"enabled":false}`
+  used to zero its cap and delete its allowed hours. Renaming a combo renames it instead
+  of creating a second one. A price import with one bad row writes nothing.
+  `count_tokens` now counts against the request limits. A sync body sent without a
+  length is read, and an unknown surface name answers 400.
+- **Start-up checks.** `=false`, `=0` or `=OFF` on `EZLLM_PRICE_REFRESH`,
+  `EZLLM_UPDATE_CHECK` or `EZLLM_COMBO_AUTOPROBE` used to turn the feature on; every
+  on/off switch now takes on/off, true/false or 1/0 in any case, and anything else
+  stops the start. Provider requests honour `HTTPS_PROXY`/`NO_PROXY` and time out
+  connecting and the TLS handshake. A bridge's token now defaults to the data folder,
+  is written whole, and a bridge port already in use stops the start. The Claude
+  bridge stops the start when its CLI does not run or `USER`/`LOGNAME` are missing,
+  and its checks time out. Unknown `config.yaml` keys are logged as warnings, and a
+  bad `listen` port is refused.
+- **Your prices stay yours.** The daily price refresh skips a model you priced by hand
+  or by import. It used to write the snapshot's rate over yours. The refresh answer
+  counts those models in `kept`.
+- **Docs, latest version only.** User docs now describe only the current version, in
+  the task style, and say less: metrics, backups, settings, master key, prices,
+  logging, environment, translation and the web providers were rewritten.
+- **Bridges on Windows.** A guide for running ezllm in WSL (docs/wsl.md). The macOS script
+  now makes its data folder private, and the macOS update steps fetch the script again.
+- **Claude on macOS.** The bridge reads the login that Claude Code keeps in the Keychain.
+  It used to answer "Not logged in".
+- **Antigravity reasoning level.** The model sets it (`gemini-4-hydrogen-high`). The
+  bridge ignores a client's `reasoning_effort`; a level that differed from the model's
+  used to fail the turn.
+- **Binary install guide.** The README installs the Linux and macOS binary in one paste,
+  and `docs/install-binary.md` is steps first, for Linux, macOS and Windows. On Windows,
+  `Stop-ScheduledTask` left ezllm running and the task stopped after three days; both are
+  fixed in the steps.
+- **ez standard CI.** `publish.yml` replaces `docker-publish.yml` and `release.yml`:
+  pushes to `development` publish `:development` and `:sha-<commit>`, `master`
+  publishes `:latest`, `:X.Y.Z` and `:sha-<commit>`, and a tag publishes `:X.Y.Z` and
+  `:vX.Y.Z` with the release binaries and this file's section as the notes. CI also
+  builds and boots the image. `CONTRIBUTING.md` is now `DEVELOPER.md`.
+- **Copilot CLI 1.0.113 and newer.** The Copilot bridge speaks headless protocol 4
+  as well as 3: it sends `session.create` in the shape the connected CLI documents
+  and still refuses any other protocol. Proven live on 1.0.112 and 1.0.114. The
+  session-cache gate uses `gemini-4-hydrogen` unless `--model` names another.
+- **Antigravity caller tools on by default.** The structured-output adapter
+  turns on at boot whenever the CLI offers `--json-schema` (`cmd/ezllm/agybridge.go`);
+  a CLI without it boots text-only with a warning. `EZLLM_AGY_EXPERIMENTAL_TOOLS`
+  is retired and fails the boot. The conversation cache follows, on wherever the
+  CLI also supports `--conversation`. `bridge-check agy` now fails a CLI without
+  `--json-schema` and always runs the caller-tool live proof.
+
+- **Bridge setup guide.** `docs/bridges/` has one page per plan, for Docker Compose,
+  `docker run` and the Linux binary, and one troubleshooting page with a checker; `docs/bridge-setup.md`
+  is the index. The Claude and Codex guides staged the CLI where ezllm does not look
+  (`claude-VERSION`, `/opt/codex`). A bridge whose CLI is missing names the guide when it
+  stops the boot.
+- **Docs for one version.** User docs describe the version they ship with; what to
+  change when coming from an older one is in `docs/upgrading.md`. The bridge runbooks are
+  reference only, without setup steps. The dashboard's bridge links open the docs of the
+  running version (release tag, or `development`); `GET /admin/bridges` gains `setup` and
+  `docs`, and its 409 names the setup page.
+- **Design records moved** to `docs/design/` (with the two bridge specs from the root), so
+  `docs/` holds only what someone running ezllm needs.
+- **macOS installer.** `scripts/ezllm-mac.sh install` gets the latest release instead of
+  1.3.2; `EZLLM_VERSION` still chooses one.
+- **Neutral names.** Docs, examples, test fixtures and comments no longer name the
+  maintainers' own accounts, hosts, clients or paths. `scripts/ezllm-mac.sh` defaults
+  `EZLLM_USAGE_TZ` to UTC, and the live proof scripts default to `http://127.0.0.1:20129`,
+  with token files under `~/.config/ezllm/`. The exported request records and the
+  security audit reports are no longer in the repo.
+
 ## v2.2.0 — shared bridge admission, requests per turn, token counting, spend caps
 
 - **`POST /v1/messages/count_tokens`** answers Claude Code's token-count
@@ -141,7 +445,7 @@ ran in production before release; security records cite them by those numbers.
   "upstream attempts" notes only when a request retried. Schema v35 drops
   `calls.tool_prune_shadow_tokens` from the shelved tool-pruning experiment;
   its 2,875 measurements (11,850,055 shadow tokens, Oct 31 to Nov 4) were
-  exported to `docs/tool-prune-shadow-results.json` first. The migration runs
+  exported first. The migration runs
   once on startup and rewrites the `calls` table.
 - **Request explorer:** `/admin/requests` adds `summary.empty_steps` and a
   `hide_empty` filter; the dashboard shows a "no tokens" badge for zero-token
@@ -246,7 +550,7 @@ ran in production before release; security records cite them by those numbers.
   bind HTTP to localhost; private deployment files are excluded from image builds.
 - Replaces the audit's vulnerable-behavior probes with permanent rejection,
   redaction, cleanup and continuation regressions. Runtime rollout is separate
-  from the source fixes; see the dated remediation notes.
+  from the source fixes.
 
 ### Automatic Codex caching and noninteractive CLI defaults (pre-release 1.14.0)
 
@@ -328,7 +632,7 @@ ran in production before release; security records cite them by those numbers.
   on the wire and Claude terminal thinking details; recorded counters exercise
   the ledger usage tap without additional vendor calls.
 - Records the Hermes-only historical findings and remaining measurement limits
-  in `docs/bridge-token-usage-audit.md`. No new runtime dependency is added.
+  in `docs/design/bridge-token-usage-audit.md`. No new runtime dependency is added.
 
 ### Bridge updater reliability and coverage (pre-release 1.10.0)
 
@@ -472,7 +776,7 @@ ran in production before release; security records cite them by those numbers.
   same tool-using request: the scratch directory leaked into the tool call on
   3 of 3 runs before, 0 of 5 after. Plain chat is unchanged.
 - **The client had a stale shell directory too, and `cd ~` cannot fix it.** The
-  first failing path in the trace, `~/.hermes/cache/scratch/…/frontend`, was the
+  first failing path in the trace, `…/frontend`, was the
   client's own saved working directory, gone from disk. Its terminal wrapper
   `cd`s there BEFORE running the command, so a model that prefixed `cd ~ &&`
   (the first version of the note told it to) failed identically and gave up
@@ -495,7 +799,7 @@ ran in production before release; security records cite them by those numbers.
 - **In its place:** the `copilot-bridge` kind over the GitHub Copilot CLI
   (1.0.105), a fourth member of the claude/codex/agy bridge family. No key to
   paste: the credential is the CLI's own login. Design
-  `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
+  `docs/design/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`.
 - **Accounting is exact for the first time on this provider:** the CLI's
   `session.usage_checkpoint` gives inclusive prompt tokens with a cached slice;
   verified end-to-end through the gateway (bridge 13,971 inclusive / 9,420
@@ -582,7 +886,7 @@ ran in production before release; security records cite them by those numbers.
     days that reflect the trimmed surface, below the 2–3% trigger.
   - **Silent capability loss is what killed it, and M1 could not even see the
     usage that would have prevented it.** The top candidate by prize,
-    `dis-intelligence/official_report` (1,948 tok/req × 446 requests) is that
+    one client's report tool (1,948 tok/req × 446 requests) is that
     client's flagship tool, yet it read `used_sessions = 0`: usage is derived
     from call sites in the *request* body, and that client's only model path
     sends one user message and reads the `tool_use` block out of the *response*.
@@ -612,7 +916,7 @@ ran in production before release; security records cite them by those numbers.
 - `calls.stream_outcome` records how a STREAM ended — `completed`, `truncated`,
   `failed`, `client_gone`, empty for a non-stream request — so a hop that
   returns `200` and then dies mid-body is a fact in the ledger instead of prose
-  in `err` (`docs/hop-health-design.md`). Precedence: `client_gone` first (a
+  in `err` (`docs/design/hop-health-design.md`). Precedence: `client_gone` first (a
   caller hanging up is never a hop fault; that artefact once made 442 complete
   calls read as failures), then a translated stream's frame-level `failed`.
 - **Fixed the reason this mattered:** the proxy set `StreamOutcome` only for
@@ -677,7 +981,7 @@ ran in production before release; security records cite them by those numbers.
 
 - `ezllm bridge-check {claude|codex|agy} [--bin] [--home] [--json]` runs a
   bridge's boot checks against a staged CLI and refuses on any problem, the
-  first milestone of unattended CLI updates (`SPEC-bridge-update.md`).
+  first milestone of unattended CLI updates (`docs/design/SPEC-bridge-update.md`).
 - Bridges read `qualified.json` from the bridge directory: a version the
   updater proved reports qualified. Claude's bridge status gains `cli_release`.
 - `--live` adds real turns through the bridge's runner (plain, plus a client
@@ -820,7 +1124,7 @@ key pinned beside the data directory.
 A third trap the doc now states: the provider accounts a "fresh" install already
 shows are not auto-created by code — `seed()` upserts every entry under
 `providers:` in the bootstrap config. Copying the v1.3.2 example therefore seeded
-`opencode-main` and `ssn-gpt` as *enabled accounts with no key*, which is also
+`demo-main` and `initech-gpt` as *enabled accounts with no key*, which is also
 why the boot log warned twice about a failed model sync. `config.example.yaml`
 now ships both commented out, so a fresh instance starts with zero accounts —
 verified by booting it (healthy, 0 accounts).
@@ -901,7 +1205,7 @@ line, and the consequence is disproportionate: the hop banks a strike, the
 default threshold parks it for the full five-minute cooldown, and the next real
 request is refused from a local counter. The ledger says exactly that happened —
 all 80 of the 502s in the previous seven days were `context canceled` (38 on
-`daily`/anthropic), and eight later requests were answered "all combo endpoints
+one combo/anthropic), and eight later requests were answered "all combo endpoints
 are in five-minute cooldown".
 
 A cancellation is now a third outcome, neither success nor hop failure: it banks
@@ -1119,7 +1423,7 @@ existing account names and routing identifiers remain unchanged.
   policy fails the boot. Google's "account not eligible" refusal becomes 403
   `account_ineligible` with its sign-in link withheld. Dashboard preset
   **Antigravity subscription (bridge)** lists the plan's models. Decisions:
-  `docs/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
+  `docs/design/antigravity-subscription-design.md`; setup: `docs/agy-bridge-runbook.md`.
 - **Subscription bridges in one click.** Add provider has a preset per bridge (**Claude
   subscription**, **ChatGPT subscription**, **Antigravity subscription**). Each shows
   whether its bridge is running (CLI version, login, plan or tool state) or the
@@ -1255,7 +1559,7 @@ existing account names and routing identifiers remain unchanged.
   `EZLLM_CODEX_TOOLS_WITHOUT_LANDLOCK=on`. Structured output, reasoning summaries
   as `reasoning_content`, all models including hidden ones, and a `codex exec`
   fallback when the app-server lacks a required method
-  (`docs/codex-bridge-runbook.md`, `docs/codex-subscription-design.md`).
+  (`docs/codex-bridge-runbook.md`, `docs/design/codex-subscription-design.md`).
 - **Plan windows on the provider card.** The Claude bridge serves the CLI's 5h/7d
   `rate_limit_event` on `/v1/usage`, the Codex bridge serves `account/rateLimits/read`
   in the same shape; ezllm reads it for loopback accounts.
@@ -1266,7 +1570,7 @@ existing account names and routing identifiers remain unchanged.
   compose passes `GITHUB_COPILOT_CLI_VERSION` through.
 - **Deploy change: one compose file, yours.** `compose.yml` is no longer shipped:
   copy `compose.example.yml` (every variable with its default, bridges off, mounts
-  commented) to `compose.yml`, which is gitignored. `compose.traefik.yml` is gone;
+  commented) to `compose.yml`, which is gitignored. the reverse-proxy overlay is gone;
   proxy labels go in your copy. **Before pulling,** back up your `compose.yml`:
   git deletes a formerly tracked file on pull.
 
@@ -1306,7 +1610,7 @@ existing account names and routing identifiers remain unchanged.
   blanket refusal answered every agent message with a 400. Client `tools` and
   `tool_choice` now travel in `CLAUDE_CODE_EXTRA_BODY`; upstream sees exactly the
   client's tools and the `tool_use` blocks come back under their names
-  (`docs/claude-subscription-design.md` §2.1, §6).
+  (`docs/design/claude-subscription-design.md` §2.1, §6).
 - **Measured, not assumed (CLI 2.1.306).** A live spike replaced the planned inert
   MCP server: one generation per call, a `write_file` sentinel never written, and
   Hermes's real 57-tool list cached normally (24,112 tokens written once, then read
@@ -1331,7 +1635,7 @@ existing account names and routing identifiers remain unchanged.
   account is a host-verified Workers AI account (`api.cloudflare.com`,
   `/ai/v1`); the other classes are data only — a chat combo cannot serve an
   embedding or an image model, and catalogs do not advertise capability
-  (`docs/services-design.md`).
+  (`docs/design/services-design.md`).
 - **Five more service endpoints.** `/v1/images/edits` (multipart, shares the
   STT handler), `/v1/moderations`, `/v1/rerank`, `/v1/videos/generations`,
   `/v1/music/generations` — routed, ledgered under their own surface,
@@ -1439,7 +1743,7 @@ host — against a subscription login, and ezllm dials it as an ordinary
 `anthropic-compatible` account. The CLI stays the only thing that speaks to the
 subscription — the credential never leaves its own login store — which is the
 whole point: no OAuth-bearer reuse, no client impersonation
-(`docs/claude-subscription-design.md`, locked decision 1).
+(`docs/design/claude-subscription-design.md`, locked decision 1).
 
 - **Request path.** The client's Messages body is handed to native through
   `CLAUDE_CODE_EXTRA_BODY` (the mechanism the official Hermes plugin documents),
@@ -1556,7 +1860,7 @@ see `VERSION.md`):
 ## 2026-10-16 — M14 claude-web provider: claude.ai web protocol ✅
 Claude.ai's web app (sessionKey cookie + SSE completion) as a provider,
 ported from omniroute's production implementation (design:
-`docs/claude-web-design.md`, runbook: `docs/claude-web-runbook.md`).
+`docs/design/claude-web-design.md`, runbook: `docs/claude-web-runbook.md`).
 - `internal/claudeweb/tlsclient.go` — uTLS Chrome-146 impersonation
   (`HelloChrome_Auto`, h2 dialer) behind an injectable Fetcher (tests run
   plain HTTP; one test runs the REAL profile against a local h2 TLS server).
@@ -1628,9 +1932,8 @@ against real GitHub succeeds.
 
 ## 2026-10-16 — M12 gemini-web provider: cookie auth, oracle, streaming, bridge ✅
 The full Gemini **web** protocol as a router provider, ported slot-for-slot
-from the reverse-engineered reference (digest: `~/workspace/gemini-web-api-protocol-digest.md`,
-design: `docs/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
-Unofficial surface; risk posture accepted by Calypso: cookie material = live
+from the reverse-engineered reference (design: `docs/design/gemini-web-design.md`, runbook: `docs/gemini-web-runbook.md`).
+Unofficial surface; risk posture accepted by the owner: cookie material = live
 account access, test accounts, no fallback, typed refusals.
 - `internal/geminiweb/` — protocol package:
   - `frame.go` — wrb.fr incremental parser (length-prefixed UTF-16-unit
@@ -1710,7 +2013,7 @@ account access, test accounts, no fallback, typed refusals.
   got heavier (the one shared parse is a full map decode where the old
   single-field struct decode skipped the messages array) — the request-level
   metric is the one that counts. All numbers + the two bite proofs in
-  `docs/single-parse-dispatch-design.md`.
+  `docs/design/single-parse-dispatch-design.md`.
 - `prefix_sha` now sees JSON number literals verbatim (`1e10` and
   `10000000000` hash differently, big ids keep exact digits) instead of
   collapsing through float64 — correct for a cache-BREAK detector; documented.
@@ -1894,7 +2197,7 @@ account access, test accounts, no fallback, typed refusals.
   inline (`358cda3`).
 
 ## 2026-10-08 — Docker, dashboard polish, budget engine
-- Distroless image + home-box Traefik overlay; explicit router priorities and a dedicated
+- Distroless image + reverse-proxy overlay; explicit router priorities and a dedicated
   `/admin/login` limiter (`3f46f00`, `3155b76`).
 - `POST /admin/chat` behind the real routing path; Chat page, Token Economics, budget controls
   (`d0f8407`, `d8d0f68`).

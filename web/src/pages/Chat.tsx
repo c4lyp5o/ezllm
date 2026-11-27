@@ -8,6 +8,7 @@
 // carries how it was made (first-token and total time) and, once the ledger has
 // written the row, which provider served it and the real token counts — found
 // by tagging each request with an X-Ezllm-Session id.
+import { ExtraIntro, useIntroHidden } from '../components/ExtraIntro';
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode,
 } from 'react';
@@ -19,7 +20,9 @@ import {
   EMPTY_PARAMS, clearSession, loadPresets, loadSession, newColumn, newId, parseParams, saveSession,
   savePresets, toJSON, toMarkdown, toMessage,
   type Column, type Params, type Preset, type Turn, type TurnMeta,
+  fenceFor, looksBinary,
 } from '../utils/chatlog';
+import { routableModels } from '../utils/tokens';
 import { fmtDuration, fmtMs, nfmt } from '../utils/lib';
 import { Markdown } from '../components/markdown';
 import { DUR, spring } from '../components/motion';
@@ -115,15 +118,25 @@ function Scroller({ follow, label, children }: { follow: string; label: string; 
   const [away, setAway] = useState(false);
   // Our own scrolls to the bottom raise scroll events that land after the
   // content has grown again, so "not near the bottom" alone cannot mean the
-  // reader left. Leaving is a scroll UP; content growth never moves the
-  // position up. At the bottom always means following.
+  // reader left. Leaving is a scroll UP that the reader made: a wheel, touch,
+  // key or scrollbar press just before it, or a jump of half a screen or more.
+  // The browser also moves the position up by itself when content shrinks (an
+  // entrance settling, a spinner row leaving), and if more content lands
+  // before that scroll event fires, the event reads as "up and far from the
+  // bottom". That is not the reader, so it must not let go.
+  // At the bottom always means following.
   const lastTop = useRef(0);
+  const intent = useRef(0);
+  const noteIntent = () => { intent.current = performance.now(); };
   const measure = () => {
     const el = ref.current;
     if (!el) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const up = lastTop.current - el.scrollTop;
+    const byReader = performance.now() - intent.current < 500 || up > el.clientHeight / 2;
     if (near) { stuck.current = true; setAway(false); }
-    else if (el.scrollTop < lastTop.current - 1) { stuck.current = false; setAway(true); }
+    else if (up > 1 && byReader) { stuck.current = false; setAway(true); }
+    else if (up > 1 && stuck.current) el.scrollTop = el.scrollHeight;
     lastTop.current = el.scrollTop;
   };
   // Content can change height without any scroll event (a spinner row leaving
@@ -136,21 +149,26 @@ function Scroller({ follow, label, children }: { follow: string; label: string; 
   }, [follow]);
   // Some growth never re-renders React (a code block laying out, a late
   // paint): watch the content's own size so following does not depend on it.
+  // Watch the scroll area too: when it gets shorter (a row appears below it
+  // as a stream ends) the bottom moves away with no scroll event, and the
+  // next small upward clamp would read as the reader leaving.
   const inner = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = inner.current;
-    if (!node || typeof ResizeObserver === 'undefined') return;
+    if (!node || !ref.current || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
       const el = ref.current;
       if (el && stuck.current) el.scrollTop = el.scrollHeight;
       measure();
     });
     ro.observe(node);
+    ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={ref} onScroll={measure} role="log" aria-label={label} aria-live="off"
+      <div ref={ref} onScroll={measure} onWheel={noteIntent} onTouchMove={noteIntent} onKeyDown={noteIntent} onPointerDown={noteIntent}
+        role="log" aria-label={label} aria-live="off"
         className="h-full overflow-y-auto px-3 py-3">
         <div ref={inner} className="space-y-3">{children}</div>
       </div>
@@ -360,6 +378,14 @@ export default function Chat() {
           ...m, id: `${accounts[index].namespace}/${m.id}`,
           display: `${accounts[index].namespace} / ${m.display ?? m.id}`,
         })));
+        // Combos route too: list them first, from the same routable list
+        // clients see. A combo id has no namespace (no "/"). Best effort: the
+        // provider models still work when this read fails.
+        try {
+          const combos = (await routableModels()).filter(m => !m.id.includes('/'));
+          if (!live) return;
+          flat.unshift(...combos.map(m => ({ id: m.id, display: `combo / ${m.id}` })));
+        } catch { /* provider models only */ }
         const failed = accounts.filter((_, index) => results[index] === null);
         if (failed.length) setCatalogError(`Could not load models for ${failed.map(a => a.name).join(', ')}.${failed.length < accounts.length ? ' Other providers still work.' : ''}`);
         setCatalog(flat);
@@ -418,9 +444,16 @@ export default function Chat() {
         continue;
       }
       try {
-        next.push(IMAGE_TYPES.test(f.type)
-          ? { name: f.name, size: f.size, dataUrl: await readAsDataURL(f) }
-          : { name: f.name, size: f.size, text: await readAsText(f) });
+        if (IMAGE_TYPES.test(f.type)) {
+          next.push({ name: f.name, size: f.size, dataUrl: await readAsDataURL(f) });
+        } else {
+          const text = await readAsText(f);
+          if (looksBinary(text)) {
+            setError(`${f.name} isn't a text file. Attach text files or images.`);
+            continue;
+          }
+          next.push({ name: f.name, size: f.size, text });
+        }
         total += f.size;
       } catch {
         setError(`could not read ${f.name}`);
@@ -435,7 +468,10 @@ export default function Chat() {
     let textPart = text;
     for (const p of pending) {
       if (p.dataUrl) parts.push({ type: 'image_url', image_url: { url: p.dataUrl } });
-      else if (p.text != null) textPart += `\n\n--- ${p.name} ---\n\`\`\`\n${p.text}\n\`\`\`\n`;
+      else if (p.text != null) {
+        const fence = fenceFor(p.text);
+        textPart += `\n\n--- ${p.name} ---\n${fence}\n${p.text}\n${fence}\n`;
+      }
     }
     if (textPart.trim()) parts.unshift({ type: 'text', text: textPart.trim() });
     return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
@@ -617,6 +653,7 @@ export default function Chat() {
     const next = [...presets.filter((p) => p.name !== name), { name, text: system.trim() }].sort((a, b) => a.name.localeCompare(b.name));
     setPresets(next); savePresets(next); setPresetName('');
   };
+  const [introHidden, hideIntro] = useIntroHidden('chat');
   const headBtn = cx(btn.base, btn.ghost, '!h-8 !px-3 !text-[13px] disabled:opacity-45');
 
   return (
@@ -721,6 +758,12 @@ export default function Chat() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {!hasMessages && !introHidden && (
+        <ExtraIntro title="Chat" onClose={hideIntro}>
+          <p>Talk to any of your models here, side by side, to compare answers before you put one in a combo. Uses your providers like any other request.</p>
+        </ExtraIntro>
+      )}
 
       {catalogError && <div role="alert" className="shrink-0 rounded-xl border border-warn/30 bg-warn-dim px-4 py-3 text-[13px] text-ink">{catalogError} <button type="button" className="underline" onClick={() => setCatalogAttempt(n => n + 1)}>Retry models</button></div>}
       {error && <div role="alert" className="shrink-0 rounded-xl border border-bad/30 bg-bad-dim px-4 py-3 text-[13px] text-bad">{error}</div>}

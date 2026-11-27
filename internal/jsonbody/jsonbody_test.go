@@ -6,7 +6,7 @@ import (
 )
 
 // The parity contract of this package is "exactly the decisions the old
-// per-site decoders made" (docs/single-parse-dispatch-design.md). Each table
+// per-site decoders made" (docs/design/single-parse-dispatch-design.md). Each table
 // below pins one decision class; a change here is a wire-behavior change and
 // needs the design doc's review first.
 

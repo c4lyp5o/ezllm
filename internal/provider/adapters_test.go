@@ -30,7 +30,7 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 	for _, surface := range []Surface{SurfaceChat, SurfaceAnthropic, SurfaceResponses} {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+SurfacePath(surface), nil)
 		// a client with its own conversation session must keep it
-		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
+		req.Header.Set("x-opencode-session", "ses-app-conv-42")
 		if err := a.PrepareRequest(t.Context(), req, acct, "sk-test-key", surface); err != nil {
 			t.Fatalf("surface %s: %v", surface, err)
 		}
@@ -38,7 +38,7 @@ func TestOpenCodeGoInjectsSessionHeaders(t *testing.T) {
 		if sess == "" {
 			t.Errorf("surface %s: x-opencode-session missing (upstream would 400)", surface)
 		}
-		if sess != "ses-hermes-conv-42" {
+		if sess != "ses-app-conv-42" {
 			t.Errorf("surface %s: client session SURVIVED? got %q — a client that names its own conversation must keep it", surface, sess)
 		}
 	}
@@ -89,13 +89,13 @@ func TestOpenCodeGoSessionIdentitySemantics(t *testing.T) {
 	first, second := "", ""
 	for _, dst := range []*string{&first, &second} {
 		req, _ := http.NewRequest(http.MethodPost, acct.BaseURL+"/chat/completions", nil)
-		req.Header.Set("x-opencode-session", "ses-hermes-conv-42")
+		req.Header.Set("x-opencode-session", "ses-app-conv-42")
 		if err := a.PrepareRequest(t.Context(), req, acct, "sk-k", SurfaceChat); err != nil {
 			t.Fatal(err)
 		}
 		*dst = req.Header.Get("x-opencode-session")
 	}
-	if first != second || first != "ses-hermes-conv-42" {
+	if first != second || first != "ses-app-conv-42" {
 		t.Errorf("stable client session not preserved across turns: %q then %q", first, second)
 	}
 }
@@ -291,7 +291,7 @@ func TestQuotaParseOpenCodePercentShape(t *testing.T) {
 }
 
 func TestQuotaParseSSNMoneyShape(t *testing.T) {
-	// Verbatim (abridged) payload captured live from ssn-gpt on 2026-10-05.
+	// Verbatim (abridged) payload captured live from initech-gpt on 2026-10-05.
 	payload := `{"balance":0.25667416,"remaining":0.25667416,"unit":"USD","isValid":true,"mode":"unrestricted","planName":"钱包余额","usage":{"rpm":0,"average_duration_ms":16463.24,"today":{"requests":1,"input_tokens":9,"output_tokens":5,"total_tokens":14,"cost":0.000068,"actual_cost":0.000136},"total":{"actual_cost":29.96545006,"cost":15.0}},"daily_usage":[{"date":"2026-10-05","requests":1,"total_tokens":14,"cost":0.000068}],"model_stats":[{"model":"gpt-6-luna","requests":1530,"total_tokens":176234829,"cost":9.03}]}`
 	q := parseMoneyQuota(payload)
 	if q.Kind != QuotaMoney {

@@ -25,6 +25,44 @@ export function SectionLabel({ children, className }: { children: ReactNode; cla
   );
 }
 
+/** Where an Advanced fold keeps its open state between visits. */
+export const ADVANCED_KEY = (id: string) => `ezllm.advanced.${id}`;
+
+/**
+ * The one fold for settings most people never need. Closed by default; with
+ * an `id` it remembers being opened, per section, in this browser.
+ */
+export function Advanced({ id, label = 'Advanced', hint, children, className, forceOpen }: {
+  id?: string; label?: string; hint?: string; children: ReactNode; className?: string;
+  /** Open regardless of the saved state, e.g. while a field inside needs fixing. */
+  forceOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(() => {
+    if (!id) return false;
+    try { return localStorage.getItem(ADVANCED_KEY(id)) === '1'; } catch { return false; }
+  });
+  const shown = open || forceOpen === true;
+  return (
+    <details open={shown} data-advanced={id ?? ''}
+      className={cx('rounded-lg border border-line bg-raised/40 px-4 py-3', className)}
+      onToggle={(e) => {
+        const el = e.currentTarget as HTMLDetailsElement;
+        // A field inside needs fixing: the fold stays open. React won't put
+        // the attribute back (its prop didn't change), so do it here.
+        if (forceOpen && !el.open) { el.open = true; return; }
+        const next = el.open;
+        setOpen(next);
+        if (id) { try { localStorage.setItem(ADVANCED_KEY(id), next ? '1' : '0'); } catch { /* private mode */ } }
+      }}>
+      <summary className="cursor-pointer select-none text-[13px] font-medium text-dim marker:text-mute">
+        {label}
+        {hint && <span className="ml-2 text-[12px] font-normal text-mute">{hint}</span>}
+      </summary>
+      {shown && <div className="mt-4 space-y-4">{children}</div>}
+    </details>
+  );
+}
+
 export function Mono({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={cx('font-mono text-[13px]', className)}>{children}</span>;
 }
@@ -58,14 +96,16 @@ export function CauseChip({ err, status }: { err?: string; status: number }) {
 
 // ── chips & badges ──────────────────────────────────────────────────────
 
-const chipTones: Record<string, string> = {
+// `satisfies`, not a Record<string, …> annotation: the keys stay literal, so a
+// tone that does not exist (tone="good") fails the type check.
+const chipTones = {
   // Pale pairs: a tint of the status with text of the same hue; no border.
   neutral: 'border-transparent bg-raised text-dim',
   accent: 'border-transparent bg-accent-dim text-accent',
   ok: 'border-transparent bg-ok-dim text-ok',
   warn: 'border-transparent bg-warn-dim text-warn',
   bad: 'border-transparent bg-bad-dim text-bad',
-};
+} satisfies Record<string, string>;
 
 export function Chip({ tone = 'neutral', children, className, title }: {
   tone?: keyof typeof chipTones; children: ReactNode; className?: string; title?: string;
@@ -88,25 +128,6 @@ export function HeaderAside({ children }: { children: ReactNode }) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   useEffect(() => { setEl(document.getElementById('page-aside')); }, []);
   return el ? createPortal(children, el) : null;
-}
-
-export function ProtocolChip({ state, label }: { state: 'yes' | 'no' | 'unknown'; label: string }) {
-  const s = state === 'yes'
-    ? <span className="text-ok">✓</span>
-    : state === 'no'
-      ? <span className="text-bad line-through decoration-bad">✕</span>
-      : <span className="text-warn">?</span>;
-  return (
-    <Chip title={`${label}: ${state === 'unknown' ? 'untested' : state === 'yes' ? 'supported' : 'not supported'}`}
-      tone={state === 'yes' ? 'ok' : state === 'no' ? 'bad' : 'warn'}>
-      {s} <span className="font-mono">{label}</span>
-    </Chip>
-  );
-}
-
-export function StaleBadge({ stale }: { stale: boolean }) {
-  if (!stale) return null;
-  return <Chip tone="warn">stale</Chip>;
 }
 
 // ── skeleton shimmers ───────────────────────────────────────────────────
@@ -411,7 +432,10 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
   }
 
   return (
-    <div ref={wrapRef} className="relative w-full">
+    <div ref={wrapRef} className="relative w-full"
+      // Tabbing past the field closes the list. The list is focusable
+      // (tabIndex -1), so clicking or scrolling it keeps focus inside.
+      onBlur={(e) => { if (open && !wrapRef.current?.contains(e.relatedTarget as Node | null)) close(); }}>
       <input
         type="text"
         id={id}
@@ -452,6 +476,7 @@ export function Combobox({ options, value, onChange, disabled, loadingText, plac
           id={listId}
           role="listbox"
           ref={listRef}
+          tabIndex={-1}
           className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-raised shadow-lg"
         >
           {filtered.length === 0 && (
@@ -625,10 +650,6 @@ export function Spinner({ className }: { className?: string }) {
 
 // ── misc ────────────────────────────────────────────────────────────────
 
-export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[11px] text-mute">{children}</kbd>;
-}
-
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return '–';
   const t = Date.parse(iso);
@@ -640,6 +661,16 @@ export function relTime(iso: string | null | undefined): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+/** A time still to come, as "in 6d"; one already past reads as relTime. */
+export function untilTime(iso: string | null | undefined): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  const m = Math.ceil((t - Date.now()) / 60_000);
+  if (Number.isNaN(t) || m <= 0) return relTime(iso);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `in ${h}h` : `in ${Math.floor(h / 24)}d`;
 }
 
 export function clockTime(iso: string): string {

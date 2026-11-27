@@ -86,8 +86,10 @@ VALUES (?,?,?,?,?,?,?,?,?)`,
 			if err != nil {
 				return err
 			}
-			id, err = res.LastInsertId()
-			return err
+			if id, err = res.LastInsertId(); err != nil {
+				return err
+			}
+			return d.recountProfiles(ctx, tx)
 		}
 		_, err := tx.ExecContext(ctx, `
 UPDATE compression_profiles SET
@@ -102,6 +104,7 @@ WHERE id=?`,
 		id = p.ID
 		return nil
 	})
+	d.afterProfileWrite(err)
 	return id, err
 }
 
@@ -117,7 +120,7 @@ func (d *DB) DeleteCompressionProfile(ctx context.Context, id int64) error {
 	if refs > 0 {
 		return fmt.Errorf("store: profile is referenced by %d combo(s); detach first", refs)
 	}
-	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+	err := d.WithWriteTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM compression_profiles WHERE id = ?`, id)
 		if err != nil {
 			return err
@@ -125,6 +128,46 @@ func (d *DB) DeleteCompressionProfile(ctx context.Context, id int64) error {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		return nil
+		return d.recountProfiles(ctx, tx)
 	})
+	d.afterProfileWrite(err)
+	return err
+}
+
+// HasCompressionProfiles reports whether any compression profile exists. The
+// count is cached and kept current by every profile write, so a request on an
+// instance that never set compression up reads nothing from the database.
+// A failed read answers true: the caller then looks things up as before.
+func (d *DB) HasCompressionProfiles(ctx context.Context) bool {
+	if n := d.profileCount.Load(); n >= 0 {
+		return n > 0
+	}
+	var n int64
+	if err := d.r.QueryRowContext(ctx, `SELECT COUNT(*) FROM compression_profiles`).Scan(&n); err != nil {
+		return true
+	}
+	// Only fill an empty cache: a write that landed meanwhile has already
+	// stored the newer count.
+	d.profileCount.CompareAndSwap(-1, n)
+	return n > 0
+}
+
+// recountProfiles stores the profile count from inside a write transaction,
+// while the write lock is held, so two writes can't store their counts out of
+// order.
+func (d *DB) recountProfiles(ctx context.Context, tx *sql.Tx) error {
+	var n int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM compression_profiles`).Scan(&n); err != nil {
+		return err
+	}
+	d.profileCount.Store(n)
+	return nil
+}
+
+// afterProfileWrite forgets the cached count when a write failed, since the
+// count stored inside it may describe a transaction that never committed.
+func (d *DB) afterProfileWrite(err error) {
+	if err != nil {
+		d.profileCount.Store(-1)
+	}
 }

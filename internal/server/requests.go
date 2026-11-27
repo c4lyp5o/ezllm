@@ -62,6 +62,16 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		bounds[name] = &v
 	}
 
+	for _, suffix := range []string{"tin", "tout"} {
+		minName, maxName := "min_"+suffix, "max_"+suffix
+		minimum, maximum := bounds[minName], bounds[maxName]
+		if minimum != nil && maximum != nil && *minimum > *maximum {
+			writeErr(w, http.StatusBadRequest, "invalid_request_error",
+				fmt.Sprintf("%s must not exceed %s", minName, maxName))
+			return
+		}
+	}
+
 	// Window: [from, to), defaulting to the last 24h with the same +1min
 	// grace /admin/usage uses (ledger rows are stamped at request start and
 	// written asynchronously — a strict `ts < now` would drop the freshest).
@@ -106,16 +116,16 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	// WHERE: the window always, token bounds only when set.
 	where := " WHERE ts >= ? AND ts < ?"
 	args := []any{from.Format(tsBoundFormat), to.Format(tsBoundFormat)}
-	add := func(cond, name string, v *int64) {
+	add := func(cond string, v *int64) {
 		if v != nil {
 			where += cond
 			args = append(args, *v)
 		}
 	}
-	add(" AND tokens_in >= ?", "min_tin", bounds["min_tin"])
-	add(" AND tokens_in <= ?", "max_tin", bounds["max_tin"])
-	add(" AND tokens_out >= ?", "min_tout", bounds["min_tout"])
-	add(" AND tokens_out <= ?", "max_tout", bounds["max_tout"])
+	add(" AND tokens_in >= ?", bounds["min_tin"])
+	add(" AND tokens_in <= ?", bounds["max_tin"])
+	add(" AND tokens_out >= ?", bounds["min_tout"])
+	add(" AND tokens_out <= ?", bounds["max_tout"])
 	if hideEmpty {
 		where += " AND NOT " + zeroTokenStep
 	}

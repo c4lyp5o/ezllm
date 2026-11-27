@@ -218,6 +218,7 @@ class Run(Home):
                             "inspect": lambda c: info, "stage": lambda n, r, root: root / r["version"],
                             "knows_bridge_check": lambda cmd: True, "restart_and_wait": mock.Mock(return_value=True),
                             "proof_script": lambda n, c, r: (True, "no proof script or token"),
+                            "RETEST_SECONDS": 0,
                             "now": lambda: at("2026-10-31T03:00")}.items():
             p = mock.patch.object(bu, name, value)
             p.start()
@@ -244,6 +245,7 @@ class Run(Home):
             self.assertEqual(self.go(), 0)
         self.assertEqual(bu.current_version(self.root_), "1.4.11")
         self.assertEqual((self.status()["result"], self.status()["previous"]), ("updated", "1.4.7"))
+        self.assertEqual(self.status()["detail"], "update succeeded")
         self.assertIn("1.4.11", json.loads((self.root_ / "qualified.json").read_text())["versions"])
         bu.restart_and_wait.assert_called_once()
 
@@ -370,7 +372,7 @@ class Gate(Home):
         self.assertIn("sha256:running-image", args)
         self.assertNotIn("mutable:tag", args)
         self.assertIn("EZLLM_CODEX_BRIDGE_CACHE=off", copied[0])
-        self.assertIn("EZLLM_AGY_EXPERIMENTAL_TOOLS=on", copied[0])
+        self.assertNotIn("EZLLM_AGY_EXPERIMENTAL_TOOLS", copied[0])
         self.assertNotIn("must-not-copy", copied[0])
         self.assertIn(str(self.home / "actual-login") + ":/codex-sub", args)
         self.assertFalse(Path(args[args.index("--env-file") + 1]).exists())
@@ -548,32 +550,153 @@ class Reliability(Run):
         self.assertEqual(self.status()["result"], "rolled_back")
 
 
-    def test_batch_is_rolled_back_together_when_one_bridge_fails(self):
+    def two_bridges(self, verdicts):
+        """agy 1.4.7 -> 1.4.11 and codex 0.167.0 -> 0.168.0, both ready. verdicts
+        maps a bridge to its post-promotion result; the run moves codex, then agy."""
         self.cfg.write_text(json.dumps({"bridges": {"claude": {"enabled": False}, "copilot": {"enabled": False}}}))
         root = self.root("codex")
         for v in ("0.167.0", "0.168.0"):
             (root / v / "bin").mkdir(parents=True)
             (root / v / "bin/codex").write_bytes(b"fixture")
         bu.swap_current(root, "0.167.0")
-        info = bu.inspect("ezllm")
-        info["Mounts"].append({"Source": str(root), "Destination": "/opt/codex-bridge"})
+        bu.inspect("ezllm")["Mounts"].append({"Source": str(root), "Destination": "/opt/codex-bridge"})
+        self.seen = []
         def release(name, cfg):
             return [{"version": "0.168.0" if name == "codex" else "1.4.11", "published": "2026-10-20T00:00:00Z"}]
         def check(name, info, live=True, **kw):
-            if name == "codex" and live:
-                return {"ok": False, "problems": ["tool protocol changed"], "retryable": False}
+            if live:
+                self.seen.append((name, bu.current_version(root), bu.current_version(self.root_)))
+                if isinstance(verdict := verdicts.get(name), Exception):
+                    raise verdict
+                return verdict or {"ok": True}
             return {"ok": True}
-        with mock.patch.object(bu, "discover", side_effect=release), mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", side_effect=check):
+        for target, value in {"discover": release, "gate": mock.Mock(return_value={"ok": True}), "prod_check": check}.items():
+            p = mock.patch.object(bu, target, value)
+            p.start()
+            self.addCleanup(p.stop)
+        return root
+
+    def test_one_failing_bridge_leaves_the_others_updated(self):
+        for bad in ({"ok": False, "problems": ["the turn timed out"], "retryable": True},
+                    {"ok": False, "problems": ["tool protocol changed"], "retryable": False}, TimeoutError()):
+            for failing in ("codex", "agy"):
+                with self.subTest(failing=failing, bad=str(bad)):
+                    self.doCleanups()
+                    self.setUp()
+                    codex = self.two_bridges({failing: bad})
+                    self.assertEqual(self.go(), 0)
+                    self.assertEqual(bu.current_version(codex), "0.167.0" if failing == "codex" else "0.168.0")
+                    self.assertEqual(bu.current_version(self.root_), "1.4.7" if failing == "agy" else "1.4.11")
+                    state = json.loads(self.state.read_text())
+                    good, good_root, good_v = ("agy", self.root_, "1.4.11") if failing == "codex" else ("codex", codex, "0.168.0")
+                    bad_root, bad_v = (codex, "0.168.0") if failing == "codex" else (self.root_, "1.4.11")
+                    self.assertNotIn("pending", state)
+                    self.assertEqual(list(state["promoted_at"]), [good])
+                    self.assertNotIn(good, state["retry_after"])
+                    self.assertNotIn(good, state["blocked"])
+                    self.assertIn(bad_v, state["retry_after"][failing])
+                    compat = isinstance(bad, dict) and not bad["retryable"]
+                    self.assertEqual(bad_v in state["blocked"].get(failing, {}), compat)
+                    self.assertEqual(json.loads((good_root / "update-status.json").read_text())["result"], "updated")
+                    self.assertEqual(json.loads((bad_root / "update-status.json").read_text())["result"], "rolled_back")
+                    self.assertIn(good_v, json.loads((good_root / "qualified.json").read_text())["versions"])
+                    self.assertFalse((bad_root / "qualified.json").exists())
+                    # one restart for the good bridge, promote + restore for the bad one
+                    self.assertEqual(bu.restart_and_wait.call_count, 3)
+
+    def retested(self, *verdicts, proofs=(True,)):
+        """One agy promotion whose live checks answer verdicts in turn (static
+        rollback checks always pass). Returns the live checks made and the waits."""
+        answers, scripts = iter(verdicts), iter(proofs)
+        made, waits = [], []
+        def check(name, info, live=True, **kw):
+            if not live:
+                return {"ok": True}
+            made.append(bu.current_version(self.root_))
+            return next(answers)
+        with mock.patch.object(bu, "gate", return_value={"ok": True}), mock.patch.object(bu, "prod_check", side_effect=check), \
+             mock.patch.object(bu, "proof_script", lambda *a: (next(scripts), "script")), \
+             mock.patch.object(bu, "RETEST_SECONDS", 120), mock.patch.object(bu.time, "sleep", waits.append):
             self.assertEqual(self.go(), 0)
-        self.assertEqual(bu.current_version(root), "0.167.0")
-        self.assertEqual(bu.current_version(self.root_), "1.4.7")
-        self.assertFalse((root / "qualified.json").exists())
-        self.assertFalse((self.root_ / "qualified.json").exists())
+        return made, waits
+
+    BUSY = {"ok": False, "problems": ["live conversation cache: agy-bridge: the turn timed out"], "retryable": True}
+
+    def test_a_temporary_failure_is_tested_once_more_and_kept(self):
+        made, waits = self.retested(self.BUSY, {"ok": True, "policy": {"caller_tools": "structured-output"}})
+        self.assertEqual((made, waits), (["1.4.11", "1.4.11"], [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
+        self.assertEqual(self.status()["result"], "updated")
+        rec = json.loads((self.root_ / "qualified.json").read_text())["versions"]["1.4.11"]
+        self.assertEqual(rec["policy"], {"caller_tools": "structured-output"})
         state = json.loads(self.state.read_text())
-        self.assertNotIn("pending", state)
-        self.assertIn("0.168.0", state["blocked"]["codex"])
+        self.assertNotIn("1.4.11", state["retry_after"].get("agy", {}))
+        bu.restart_and_wait.assert_called_once()
+
+    def test_a_second_temporary_failure_rolls_back_without_a_third_try(self):
+        made, waits = self.retested(self.BUSY, self.BUSY)
+        self.assertEqual((len(made), waits), (2, [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        state = json.loads(self.state.read_text())
+        self.assertIn("1.4.11", state["retry_after"]["agy"])
         self.assertNotIn("agy", state["blocked"])
+
+    def test_the_retest_can_find_a_compatibility_failure(self):
+        self.retested(self.BUSY, {"ok": False, "problems": ["tool protocol changed"], "retryable": False})
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("1.4.11", json.loads(self.state.read_text())["blocked"]["agy"])
+
+    def test_a_compatibility_failure_is_not_retested(self):
+        made, waits = self.retested({"ok": False, "problems": ["tool protocol changed"], "retryable": False})
+        self.assertEqual((len(made), waits), (1, []))
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+
+    def test_a_failed_gateway_proof_is_tested_once_more(self):
+        made, waits = self.retested({"ok": True}, {"ok": True}, proofs=(False, True))
+        self.assertEqual((len(made), waits), (2, [120]))
+        self.assertEqual(bu.current_version(self.root_), "1.4.11")
+
+    def test_each_bridge_is_proven_before_the_next_one_moves(self):
+        codex = self.two_bridges({})
+        self.assertEqual(self.go(), 0)
+        self.assertEqual(self.seen, [("codex", "0.168.0", "1.4.7"), ("agy", "0.168.0", "1.4.11")])
+        self.assertEqual(sorted(json.loads(self.state.read_text())["promoted_at"]), ["agy", "codex"])
         self.assertEqual(bu.restart_and_wait.call_count, 2)
+
+    def test_an_incomplete_rollback_stops_the_remaining_bridges(self):
+        self.two_bridges({})
+        with mock.patch.object(bu, "restart_and_wait", return_value=False), mock.patch.object(bu, "notify_fallback", mock.Mock()):
+            self.assertEqual(self.go(), 2)
+        self.assertEqual(list(json.loads(self.state.read_text())["pending"]), ["codex"])
+        self.assertEqual(bu.current_version(self.root_), "1.4.7")
+        self.assertIn("codex rollback is incomplete", self.status()["detail"])
+        self.assertEqual(self.seen, [])
+
+    def test_the_window_and_container_are_rechecked_before_every_bridge(self):
+        for what in ("window", "container"):
+            with self.subTest(what):
+                self.doCleanups()
+                self.setUp()
+                codex = self.two_bridges({})
+                old = bu.inspect("ezllm")
+                moved = {**old, "Id": "replacement"}
+                restarted = []
+                bu.restart_and_wait.side_effect = lambda *a: restarted.append(1) or True
+                clock = (lambda: at("2026-10-31T05:30") if restarted and what == "window" else at("2026-10-31T03:00"))
+                look = (lambda c: moved if restarted and what == "container" else old)
+                with mock.patch.object(bu, "now", clock), mock.patch.object(bu, "inspect", look):
+                    self.assertEqual(self.go(), 0)
+                self.assertEqual(bu.current_version(codex), "0.168.0")
+                self.assertEqual(bu.current_version(self.root_), "1.4.7")
+                self.assertIn("window closed" if what == "window" else "production changed", self.status()["detail"])
+                self.assertEqual(bu.restart_and_wait.call_count, 1)
+
+    def test_a_report_failure_after_commit_does_not_stop_the_next_bridge(self):
+        codex = self.two_bridges({})
+        with mock.patch.object(bu, "prune", side_effect=OSError("disk")):
+            self.assertEqual(self.go(), 0)
+        self.assertEqual((bu.current_version(codex), bu.current_version(self.root_)), ("0.168.0", "1.4.11"))
+        self.assertNotIn("pending", json.loads(self.state.read_text()))
 
     def test_recovery_never_restarts_a_replaced_container(self):
         state = json.loads(self.state.read_text())
@@ -631,16 +754,25 @@ class CodexForkCachePolicy(unittest.TestCase):
 
 class AGYConversationCachePolicy(unittest.TestCase):
     def test_resume_mode_must_be_proven(self):
-        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on", "EZLLM_AGY_BRIDGE_CACHE=on"]}}
+        info = {"Config": {"Env": ["EZLLM_AGY_BRIDGE_CACHE=on"]}}
         self.assertIn("EZLLM_AGY_BRIDGE_CACHE", bu.GATE_ENV)
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
         info["Config"]["Env"][-1] = "EZLLM_AGY_BRIDGE_CACHE=off"
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output"})
 
-    def test_resume_defaults_on_with_tools(self):
-        info = {"Config": {"Env": ["EZLLM_AGY_EXPERIMENTAL_TOOLS=on"]}}
+    def test_default_policy_requires_live_tools_and_resume(self):
+        info = {"Config": {"Env": []}}
         self.assertEqual(bu.gate_policy("agy", info), {"caller_tools": "structured-output", "session_cache": "conversation-resume"})
-        self.assertEqual(bu.gate_policy("agy", {"Config": {"Env": []}}), {"caller_tools": "off"})
+        expected = bu.gate_policy("agy", info)
+        verdict = {"bridge": "agy", "version": "1.5.15", "ok": True, "live": True,
+                   "policy": expected, "problems": []}
+        result = mock.Mock(stdout=json.dumps(verdict), returncode=0)
+        self.assertTrue(bu.checked_verdict(result, "agy", True, "1.5.15", expected)["ok"])
+        for incomplete in ({"caller_tools": "off"}, {"caller_tools": "structured-output"}):
+            verdict["policy"] = incomplete
+            result.stdout = json.dumps(verdict)
+            with self.assertRaisesRegex(ValueError, "configured bridge policy"):
+                bu.checked_verdict(result, "agy", True, "1.5.15", expected)
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,7 @@
 // func(ctx, accountID, modelID) error so routing strategies never need to know
 // WHY a hop is unavailable, only that it is.
 //
-// Design doc: docs/rules-engine-design.md (approved 2026-10-06).
+// Design doc: docs/design/rules-engine-design.md (approved 2026-10-06).
 //
 // Two invariants this package exists to keep:
 //
@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/tzloc"
 )
 
 // Clock abstracts "now" so tests inject a fixed instant instead of sleeping
@@ -86,7 +88,7 @@ func (w Window) loc() *time.Location {
 	if w.TZ == "" {
 		return time.UTC
 	}
-	if l, err := time.LoadLocation(w.TZ); err == nil {
+	if l, err := tzloc.Load(w.TZ); err == nil {
 		return l
 	}
 	return time.UTC
@@ -110,9 +112,9 @@ func (w Window) ValidateTZ() error {
 	if tz == "" || tz == "instance" {
 		return nil // empty = UTC, by design
 	}
-	if _, err := time.LoadLocation(tz); err != nil {
+	if _, err := tzloc.Load(tz); err != nil {
 		return fmt.Errorf("win_tz %q does not resolve to a time zone on this host "+
-			"(typo? use an IANA name like Asia/Kuala_Lumpur or an offset like +08:00): %w", tz, err)
+			"(typo? use an IANA name like Europe/Berlin or an offset like +08:00): %w", tz, err)
 	}
 	return nil
 }
@@ -226,7 +228,24 @@ func (w Window) NextAllowed(now time.Time) time.Time {
 		// Start already passed (or is now): next day at Start.
 		next = next.AddDate(0, 0, 1)
 	}
+	// The window opens only on its days (a window belongs to the day it
+	// starts on): skip the others, or a Mon-Fri window refused on Friday
+	// evening would say "try Saturday".
+	if len(w.Days) > 0 {
+		for i := 0; i < 7 && !w.allowsDay(next.Weekday()); i++ {
+			next = next.AddDate(0, 0, 1)
+		}
+	}
 	return next
+}
+
+func (w Window) allowsDay(d time.Weekday) bool {
+	for _, x := range w.Days {
+		if x == int(d) {
+			return true
+		}
+	}
+	return false
 }
 
 // bucketFor returns the meter bucket key for `now` under the rule's cap
@@ -241,7 +260,7 @@ func (r *Rule) bucketFor(now time.Time, loadLoc func(string) *time.Location) str
 			loc = l
 		}
 	} else if r.Window.TZ != "" {
-		if l, err := time.LoadLocation(r.Window.TZ); err == nil {
+		if l, err := tzloc.Load(r.Window.TZ); err == nil {
 			loc = l
 		}
 	}

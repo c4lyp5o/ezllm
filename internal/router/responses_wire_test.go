@@ -22,7 +22,7 @@ func solCombo() *store.Combo {
 // the route's Surface stays the CLIENT's.
 func TestResponsesWireHopMarkedInPlace(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
-	r := New(cat).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
+	r := New(cat).WithResponsesModels([]string{"initech/gpt-6.1-sol"})
 
 	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
@@ -65,7 +65,7 @@ func TestResponsesWireEmptyListInert(t *testing.T) {
 // namespace, or a different model in the same namespace, stays native.
 func TestResponsesWireMatchesNamespaceAndModel(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
-	r := New(cat).WithResponsesModels([]string{"opengo/gpt-6.1-sol"})
+	r := New(cat).WithResponsesModels([]string{"demo/gpt-6.1-sol"})
 
 	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceChat, "test")
 	if err != nil {
@@ -80,9 +80,9 @@ func TestResponsesWireMatchesNamespaceAndModel(t *testing.T) {
 
 // Direct routes get the same wire fix as combo hops.
 func TestResponsesWireDirectRouteMarked(t *testing.T) {
-	r := New(newFake()).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
+	r := New(newFake()).WithResponsesModels([]string{"initech/gpt-6.1-sol"})
 
-	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6.1-sol", provider.SurfaceChat, "test")
+	routes, err := r.ResolveCandidates(context.Background(), "initech/gpt-6.1-sol", provider.SurfaceChat, "test")
 	if err != nil {
 		t.Fatalf("direct resolution: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestResponsesWireDirectRouteMarked(t *testing.T) {
 // has no /v1/messages at all). Responses clients ARE the wire: never marked.
 func TestResponsesWireMarksAnthropicNotResponses(t *testing.T) {
 	cat := withCombo(newFake(), solCombo())
-	r := New(cat).WithResponsesModels([]string{"super-ssn/gpt-6.1-sol"})
+	r := New(cat).WithResponsesModels([]string{"initech/gpt-6.1-sol"})
 
 	routes, err := r.ResolveCandidates(context.Background(), "daily", provider.SurfaceAnthropic, "test")
 	if err != nil {

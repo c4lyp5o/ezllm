@@ -91,13 +91,13 @@ func (r *Runner) park(c *child, st *turnState, res Result) {
 		}
 		r.pmu.Unlock()
 		if live {
-			r.logf("codex-bridge: parked tool turn expired without results", "calls", len(pt.ids))
+			r.logf("codex-bridge: parked tool turn expired without results calls=%d", len(pt.ids))
 			pt.c.dispose()
 		}
 	})
 	r.pmu.Unlock()
 	for _, e := range evict {
-		r.logf("codex-bridge: parked tool turn evicted (MaxParked)", "calls", len(e.ids))
+		r.logf("codex-bridge: parked tool turn evicted (MaxParked) calls=%d", len(e.ids))
 		e.c.dispose()
 	}
 }

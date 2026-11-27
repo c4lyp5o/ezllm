@@ -25,8 +25,8 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get("EZLLM_BASE", "http://127.0.0.1:20139")
-ADMIN_TOKEN_FILE = "~/.hermes/secrets/ezllm-admin.token"
-NIM_KEY_FILE = "~/.hermes/secrets/nvidia-nim-api-key.txt"
+ADMIN_TOKEN_FILE = "~/.config/ezllm/ezllm-admin.token"
+NIM_KEY_FILE = "~/.config/ezllm/nvidia-nim-api-key.txt"
 
 
 def env_path(name: str, default: str) -> str:

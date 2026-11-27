@@ -1,34 +1,13 @@
 # Antigravity subscription runbook
 
-Operating the Google Antigravity subscription surface (agy-bridge). Decisions
-live in `antigravity-subscription-design.md`; this is the how.
+How the Antigravity bridge behaves, its limits and its lockdown. **To turn it on,
+follow [Turn on Google Antigravity](bridges/antigravity.md).** Design:
+[antigravity-subscription-design.md](design/antigravity-subscription-design.md).
 
-**Status:** text chat and streaming, with usage, against the Antigravity CLI
-1.4.7. An opt-in experimental structured-output adapter supports caller tools
-on CLIs with `--json-schema`; see [caller tools](#experimental-caller-tools).
-Images and plan windows are not offered. Linux only.
-
-## Quick setup
-
-Start with a working ezllm installation and dashboard ([quick start](../README.md#quick-start)).
-This guide uses Docker Compose in a Linux environment and a separate Google login.
-By default this bridge is text-only. Caller tools require an explicit experimental
-opt-in; image input remains unsupported.
-Validation and test requests use subscription quota. Each step links to details below.
-
-1. **Install the official CLI on the host** and pin a copy of the binary
-   ([prerequisites](#prerequisites)).
-2. **Log in to a separate folder, with D-Bus unset**, so the login is a file the
-   container can read, not an entry in your desktop keyring
-   ([log in](#log-in)).
-3. **Clear Google's eligibility check** for that account if the first prompt
-   asks you to ([eligibility](#eligibility)).
-4. **Turn it on** in `compose.yml`: uncomment the two Antigravity mounts, set
-   `EZLLM_AGY_BRIDGE: "on"`, then `docker compose up -d` ([enable](#enable)).
-5. **Add the account** in the dashboard: Providers → Add provider →
-   **Google Antigravity** → Save & validate key. The dialog shows
-   whether the bridge is running and which models the plan has; there is no key
-   to paste. Cap it under Rules before agents use it.
+**Status:** text chat and streaming, with usage, against compatible Antigravity
+CLI releases. Caller tools are on by default when the CLI supports
+`--json-schema`; see [caller tools](#caller-tools).
+Images are not offered. Linux only.
 
 ## What it is
 
@@ -45,62 +24,31 @@ reads it at boot and serves it at `/v1/models`. Measured on a personal plan
 (1.4.7): `gemini-3.8-flash-high|medium|low`, `claude-sonnet-4-6`,
 `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`.
 
-## Prerequisites
+The model sets the reasoning level: choose `gemini-4-hydrogen-high` for high. The bridge
+ignores a client's `reasoning_effort`, because `agy` refuses a turn whose `--effort`
+differs from the level in the model name, and any `--effort` on a Claude model
+(measured on 1.5.13 and 1.5.16).
 
-```bash
-# official installer: SHA-512-verified download to ~/.local/bin/agy
-curl -fsSL https://antigravity.google/cli/install.sh | bash
-agy --version                                   # check this before choosing a path
+## CLI releases
 
-# pin a copy outside the self-updating path; compose mounts THIS file
-# Replace VERSION with the actual installed version; 1.4.7 is qualified.
-VERSION=1.4.7
-mkdir -p "$HOME/.local/share/agy-bridge/$VERSION"
-cp ~/.local/bin/agy "$HOME/.local/share/agy-bridge/$VERSION/agy"
-```
+`agy` updates itself in place in the background, even from `--version`. Keep the version
+folder read-only, as the setup page does, so the bridge moves to a new release only when
+you copy one and move the `current` link.
 
-`agy` updates itself in place in the background. Mounting `~/.local/bin/agy`
-would let an update change the CLI under a running bridge; the pinned copy is
-mounted read-only. Make its folder read-only on the host too
-(`chmod a-w ~/.local/share/agy-bridge/VERSION`): running the pinned copy on the
-host — even `--version` — lets agy rewrite it in place, renaming the original
-to `agy.<n>.old` (measured 2026-10-30, 1.4.7 → 1.4.11). The running container
-keeps the original until the next recreate, which then boots the new release
-unannounced. With the copy read-only, so the bridge only moves to a new release when you copy one
-and change the mount. A release other than 1.4.7 still boots, and `/status`
-reports it as `unqualified` until the live proof ([verify](#verify)) has been
-re-run and recorded in `qualified.json`.
+`ezllm bridge-check agy` runs the boot checks against a staged CLI and exits non-zero
+on any problem. `--json` prints the verdict (`ok`, `version`, `release`, `live`,
+`problems`) for the [updater](bridge-update-runbook.md). `--live` then drives real turns
+through the bridge (plan quota, the shared login), only when every static check passed.
+A version the updater proved is listed in `qualified.json` in the bridge directory, and
+boot reports it qualified; any other version still boots and is reported `unqualified`.
 
-**Gate a release before promoting it.** `ezllm bridge-check agy` runs the boot
-checks against a staged CLI and exits non-zero on any problem — stricter than
-boot, which reports an empty model list and keeps serving. `--json` prints the verdict
-(`ok`, `version`, `release`, `live`, `problems`) for the bridge updater
-(`SPEC-bridge-update.md`). `--live` then drives real turns through the bridge
-(plan quota, the shared login) — only when every static check passed. A version the updater proved is listed in
-`qualified.json` in the bridge directory (next to the version folders, up to two
-levels above the binary); boot then reports it qualified.
+## The login
 
-The binary is ~228 MB, dynamically linked against glibc; the ezllm image
-(distroless cc-debian12) carries glibc and libstdc++.
-
-## Log in
-
-```bash
-mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub
-env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/1.4.7/agy
-```
-
-If you used a version other than 1.4.7 above, replace `1.4.7` in the command
-with that version. Run it in a real terminal (SSH is fine; it prints a URL and asks for the code).
-Pick a theme, trust the folder, sign in with the Google account that has the
-plan, send one prompt, then `/exit`.
-
-- **D-Bus unset is load-bearing.** On a desktop host `agy` stores the token in
-  the Secret Service keyring, which the container cannot reach. With no session
-  bus it writes `~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token`
-  (0600) instead — the file the bridge checks at boot.
-- **`HOME=~/.agy-sub`** keeps this login apart from any personal `agy` use, as
-  `~/.claude-sub` and `~/.codex-sub` do for the other bridges.
+The login must be a file the container can read:
+`~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token` (0600), which the bridge
+checks at boot. That is why the setup page unsets D-Bus: with a session bus `agy` stores
+the token in the desktop keyring instead. `HOME=~/.agy-sub` keeps this login apart from
+your own `agy`.
 
 ## Eligibility
 
@@ -110,40 +58,23 @@ Verify your account to continue.` — on every model, while `agy models` still
 works. The CLI prints a one-time accounts.google.com link; open it signed in to
 the same account and complete the verification. The bridge maps this to
 **403 `account_ineligible`** and withholds the link (it is a sign-in
-continuation), so run the login command above again to see it.
+continuation), so run the [sign-in command](bridges/antigravity.md#3-sign-in) again to see it.
 
 If Google still refuses after verifying, the account itself is out of scope
 (region, age, or a Workspace domain that turned Antigravity off); use another
 personal account.
 
-## Enable
+## Boot checks
 
-In `compose.yml`, under the ezllm service, add these entries to the existing
-`environment` and `volumes` sections. Replace `/home/you` with your actual host
-path; the default `EZLLM_AGY_BIN` is `/opt/agy-bridge/current/agy`. The Compose service user must be able to execute the
-CLI and read and write the login directory:
-
-```yaml
-    environment:
-      EZLLM_AGY_BRIDGE: "on"
-    volumes:
-      - /home/you/.local/share/agy-bridge:/opt/agy-bridge:ro
-      - /home/you/.agy-sub:/agy-sub
-```
-
-The login directory is read-write: `agy` refreshes its token and keeps state
-there. `docker compose up -d`, then `docker logs ezllm` shows
-`agy bridge listening addr=127.0.0.1:8792 cli=1.4.7 release=qualified models=6`.
-
-Boot fails, by design, when the binary is missing, a required flag is gone, the
-token file is absent, `settings.json` loosens the tool policy
+ezllm does not start, by design, when the bridge is on and the binary is missing, a
+required flag is gone, the token file is absent, `settings.json` loosens the tool policy
 ([lockdown](#lockdown)), or `agy models` fails. Every message names its fix.
-All variables: [environment.md](environment.md#antigravity-google-subscription-bridge).
+All variables: [environment.md](environment.md#antigravity-bridge).
 
 ## Lockdown
 
 `agy` is a coding agent with its own tools (`run_command`, `write_to_file`, …)
-and it runs **on the ezllm host**, next to `/data`. No 1.4.7 flag switches
+and it runs **on the ezllm host**, next to `/data`. No flag switches
 those tools off, so the bridge holds them to what headless mode does by default
 and refuses anything looser:
 
@@ -167,18 +98,19 @@ and refuses anything looser:
 The agent's tool steps are counted and logged per turn
 (`agy-bridge: turn attempted N agent tool step(s)`); they never reach the client.
 
-## Experimental caller tools
+## Caller tools
 
-Set `EZLLM_AGY_EXPERIMENTAL_TOOLS=on` in the ezllm service environment, rebuild
-with this version, and recreate the container. Boot requires `--json-schema`
-in the mounted CLI's help. The bridge `/status` field `client_tools` reports
-`experimental (structured output; caller executes)` when enabled. No new
-process type, listener, dependency or service is installed.
+On by default: there is no setting. Boot turns the adapter on when the mounted
+CLI's help lists `--json-schema`; the bridge `/status` field `client_tools`
+reports `on (structured output; caller executes)`. A CLI without the
+flag still boots, text-only, with a warning in the log and `client_tools: off`.
+`ezllm bridge-check agy` fails such a CLI, so the updater will not promote a
+release that drops the flag.
 
 The bridge supplies tool definitions and conversation history as JSON in a
 prompt and passes an output schema through a private temporary file. It
 validates the CLI's complete envelope, then emits ordinary OpenAI tool calls.
-Hermes or another harness executes those calls using its own workspace and
+Your client executes those calls using its own workspace and
 permissions. The follow-up request must include assistant tool calls and all
 matching tool results. Each request starts a new `agy` process: nothing stays
 parked while the caller runs its tools. The tradeoff is repeated CLI startup
@@ -192,7 +124,7 @@ Schema objects with `type: object`; references are refused because embedding
 changes their resolution root. The CLI performs argument-schema validation;
 ezllm independently checks envelope structure, names, object arguments, choice
 and call limits. The harness must validate and authorize execution as usual.
-Legacy functions, images and combining tools with non-text `response_format`
+The old `functions` field, images, and tools combined with a non-text `response_format`
 are unsupported.
 
 The envelope is buffered even for streaming requests, so time to first output
@@ -205,14 +137,14 @@ select caller tools instead of using its built-ins. The CLI's `finish` tool
 may submit structured output; every other reported native tool step fails the
 adapter turn. The submitted output still has to pass validation. This is a detection guard, not a native tools-off
 switch: existing headless lockdown and the empty workspace remain necessary.
-Model compliance is not guaranteed. Keep this option off for workloads that
-need proven native function calling.
+Model compliance is not guaranteed. Route workloads that need proven native
+function calling to another provider.
 
 Run the two-turn live proof (uses subscription quota) against your pinned CLI:
 
 ```bash
 EZLLM_AGY_LIVE=1 EZLLM_AGY_BIN=/path/to/pinned/agy \
-  go test -short ./internal/agybridge -run '^TestLiveExperimentalToolRoundTrip$' -count=1 -v
+  go test -short ./internal/agybridge -run '^TestLiveCallerToolRoundTrip$' -count=1 -v
 ```
 
 It requests a harmless lookup call, simulates the result in the caller, and
@@ -221,38 +153,53 @@ filesystem or shell tools. Use `EZLLM_AGY_MODEL` to test another model.
 
 ## Limits
 
-- **Text input only.** Image parts are always refused. Without the experimental
-  option, client tools and tool messages are also refused with 400, never
-  dropped. The adapter serializes tool definitions and history into text;
+- **Text input only.** Image parts are always refused. On a CLI without
+  `--json-schema`, client tools and tool messages are also refused with 400,
+  never dropped. The adapter serializes tool definitions and history into text;
   it does not change the CLI's stream-json input protocol.
 - **History is flattened.** `agy` has no system-prompt flag and no history
   replay, so system messages and earlier turns travel inside the one prompt as
   a deterministic transcript.
-- **No plan windows.** `/usage` and `/credits` are interactive-only; the
-  provider card shows usage from the ledger, not the plan's remaining quota.
-  Quota exhaustion reaches the router as 429, so a combo moves on.
+- **Quota exhaustion** reaches the router as 429, so a combo moves on. The plan's
+  limits are on the provider card: see [Plan limits](#plan-limits-on-the-provider-card).
+- **No capacity at Google looks like a timeout.** The CLI waits and
+  retries in silence when Google has no capacity for a model (measured: three 503s with
+  waits of 18, 60 and 63 s). The bridge ends the turn at 300 s with a 504, and a combo
+  moves on; the live check ends it at 120 s. The reason is in the CLI's log, under
+  `.gemini/antigravity-cli/log/` in the login folder: look for `attempt 1 failed`.
 - **One process per request.** A trivial turn takes ~4.5–6 s and ~207 MB RSS
   (measured); `EZLLM_AGY_BRIDGE_CONCURRENCY` (default 1) caps them.
-- **No token-by-token streaming.** 1.4.7 delivers the answer in one chunk at
+- **No token-by-token streaming.** The CLI delivers the answer in one chunk at
   the end of the turn; a streaming client gets a single content delta.
 - **Harness overhead.** Every turn carries the CLI's agent prompt: ~6.7k input
   tokens on Gemini; the earlier Claude sample reported ~4k native cold input
   plus ~3.8k separate cache reads, measured on a one-word reply. Cached reads
   are separate from native input, then included in the OpenAI prompt total.
 
+## Plan limits on the provider card
+
+Press **Quota** on the account. The bridge answers `GET /v1/usage` by running
+`agy -p /usage`, which the CLI answers itself: it runs no turn and spends no quota.
+Reads run one at a time, and a reading is reused for 30 seconds, so pressing
+**Quota** again right away shows the same numbers.
+The plan has one weekly limit per group of models (Gemini, and Claude and GPT), and
+the card shows how much of each is used. A full group does not stop the other one.
+These are Google's numbers for the whole login, not ezllm's ledger. A group whose
+number the CLI leaves out is not shown.
+
 ## Conversation cache
 
-On by default since 2.0.0 whenever the tool adapter is on
-(`EZLLM_AGY_EXPERIMENTAL_TOOLS=on`) and the CLI supports `--conversation`. Set
+On by default whenever the CLI supports both `--json-schema` (caller tools)
+and `--conversation`. Set
 `EZLLM_AGY_BRIDGE_CACHE=off` to disable it; an explicit `on` without
 the adapter or `--conversation` fails startup. It applies to
-experimental tool-adapter requests, including completed caller tool-result
+tool-adapter requests, including completed caller tool-result
 groups. Plain text-only requests stay fresh. Clients continue sending full
 history; they provide no native conversation ID.
 
 A match requires unchanged prior messages, the exact previous assistant reply,
-and the same model, effort and tool policy. Only the new user message or matching
-result group is sent. Caller tool IDs remain stable, and Hermes executes the
+and the same model and tool policy. Only the new user message or matching
+result group is sent. Caller tool IDs remain stable, and the caller executes the
 tools. Edited histories, changed IDs/tools/model/policy, partial results and
 identical stateless retries cannot reuse unrelated context.
 
@@ -268,18 +215,17 @@ or the CLI's own backend conversation storage.
 The loopback `/status` reports `session_cache` and
 `runtime.conversation_cache` (`enabled`, `idle`, `hits`, `closed`). A hit confirms
 native resume, not a particular vendor discount. On Gemini Flash CLI 1.4.12,
-a synthetic Hermes-shaped caller-tool result used 2,733 cold input tokens plus
+a synthetic caller-tool result used 2,733 cold input tokens plus
 15,733 cache reads, compared with 17,791 cold input tokens on the initial turn.
 This is a token measurement, not a quota-credit reduction percentage.
 
 Native AGY input excludes cache reads. The bridge adds them for standard OpenAI
 prompt totals and subtracts resumed cumulative counters for per-request usage.
-Historical cached-input ledger rows under the previous mapping are unchanged.
 Qualification in cache mode requires a separate caller-result resume proof,
 adding two small CLI turns to the normal live gate. No internal repair call is
 made after a failed resume. Set the flag to `off` and restart for stateless replay.
 
-See [the cache design and captured counters](agy-conversation-cache-design.md)
+See [the cache design and captured counters](design/agy-conversation-cache-design.md)
 for matching, lifecycle, accounting and experiment limits.
 
 ## Verify
@@ -288,7 +234,7 @@ for matching, lifecycle, accounting and experiment limits.
 EZLLM_AGY_LIVE=1 go test -short -count=1 -v -run Live ./internal/agybridge
 ```
 
-`TestLivePreflight` checks the pinned binary and login; `TestLiveTurn` spends
+`TestLivePreflight` checks the selected binary and login without requiring an exact version; `TestLiveTurn` spends
 one small turn (default model `gemini-3.8-flash-low`, override with
 `EZLLM_AGY_MODEL`) and checks streaming and usage. On an account that has not
 cleared [eligibility](#eligibility) it skips, after checking the 403 and the
@@ -298,12 +244,3 @@ For an end-to-end check, use the gateway's [model-list command](../README.md#2-f
 then send a short text prompt to a model from this account. The dashboard preset
 shows bridge status; `docker compose logs ezllm` shows startup failures. The
 internal listener is loopback-only, and the distroless image has no shell or curl.
-
-## Shared transport status
-
-Antigravity uses `internal/bridgeutil` for streaming byte writes, flushing,
-write deadlines and cancellation cleanup as of v1.8.0. Its event format,
-authentication, accounting and CLI lifecycle remain provider-specific.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).

@@ -9,17 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-)
 
-// QualifiedVersion is the CLI release this bridge was measured against. Any
-// other version still boots (agy self-updates on the host) but /status says
-// so, and the runbook's live proof should be re-run.
-const QualifiedVersion = "1.4.7"
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
+)
 
 // RequiredFlags are asserted against `agy --help` at boot: a release that drops
 // one would otherwise fail every request.
 var RequiredFlags = []string{
-	"--print", "--output-format", "--input-format", "--model", "--effort", "--disable-slash-commands",
+	"--print", "--output-format", "--input-format", "--model", "--disable-slash-commands",
 }
 
 // TokenPath is where agy keeps the subscription login when no keyring is
@@ -39,7 +36,6 @@ type Model struct {
 // Preflight is what boot learned about the CLI.
 type Preflight struct {
 	Version            string
-	Qualified          bool
 	Models             []Model
 	StructuredOutput   bool
 	ConversationResume bool
@@ -64,18 +60,20 @@ func RunPreflight(ctx context.Context, bin, home string) (Preflight, error) {
 		return p, fmt.Errorf("agy bridge: %s --version failed: %v: %s", bin, err, strings.TrimSpace(out))
 	}
 	p.Version = strings.TrimSpace(out)
-	p.Qualified = p.Version == QualifiedVersion
 
-	help, _ := run("--help")
-	p.StructuredOutput = strings.Contains(help, "--json-schema ")
-	p.ConversationResume = strings.Contains(help, "--conversation ")
+	help, err := run("--help")
+	if err != nil {
+		return p, fmt.Errorf("agy bridge: %s --help failed: %w", bin, err)
+	}
+	p.StructuredOutput = bridgeutil.HelpHasFlag(help, "--json-schema")
+	p.ConversationResume = bridgeutil.HelpHasFlag(help, "--conversation")
 	for _, f := range RequiredFlags {
-		if !strings.Contains(help, f+" ") {
-			return p, fmt.Errorf("agy bridge: agy %s no longer offers %s; this bridge was qualified on %s — pin that release (docs/agy-bridge-runbook.md)", p.Version, f, QualifiedVersion)
+		if !bridgeutil.HelpHasFlag(help, f) {
+			return p, fmt.Errorf("agy bridge: agy %s does not offer required flag %s (docs/agy-bridge-runbook.md)", p.Version, f)
 		}
 	}
 	if _, err := os.Stat(TokenPath(home)); err != nil {
-		return p, fmt.Errorf("agy bridge: no Antigravity login at %s: log in once on the host with DBUS unset and HOME pointed at the mounted login directory (docs/agy-bridge-runbook.md)", TokenPath(home))
+		return p, fmt.Errorf("agy bridge: no Antigravity login at %s: log in once on the host with DBUS unset and HOME pointed at the mounted login directory (docs/bridges/antigravity.md)", TokenPath(home))
 	}
 	if err := CheckSettings(home); err != nil {
 		return p, err

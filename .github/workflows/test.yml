@@ -1,37 +1,21 @@
-# Test gate — run BEFORE anything publishes.
+# ez standard test workflow: lint, tests and build, plus the Docker image built,
+# booted and serving. Runs on PRs; pushes to development and master, and tags, run
+# it through publish.yml, before anything is published.
 #
-# docker-publish.yml calls this workflow and its build_and_push job says
-# `needs: test`, so a red suite never produces an image (this is the gate
-# Calypso asked for on 2026-10-16: "let CI do the testing before pushing").
-# It is reusable (`workflow_call`): docker-publish.yml AND release.yml both
-# call it, so a red suite never produces an image OR a release asset.
-#
-# Two honest notes:
-#   * GOMEMLIMIT/GOGC: the internal/server suite churned past 4GB when run
-#     unbounded locally and got OOM-killed (dmesg: server.test anon-rss
-#     4.17GB). Its live set is small — it passes at a 1GiB limit — so a soft
-#     GC ceiling keeps the runner inside budget without altering behaviour.
-#   * The web step compares committed assets with a fresh build, normalizing
-#     only Vite's checkout-dependent asset hash suffixes and references.
-name: Tests
+# GOMEMLIMIT/GOGC: the internal/server suite churned past 4 GB when run unbounded.
+# Its live set is small, so a soft GC ceiling keeps the runner inside budget. The
+# web step compares the committed bundle with a fresh build, normalizing only
+# Vite's checkout-dependent asset hash suffixes.
+name: test
 
 on:
+  pull_request:
+    branches: [development, master]
   workflow_call:
   workflow_dispatch:
-  # A PR gets the same gate as a release. Without this the reusable workflow only
-  # ever ran when docker-publish.yml or release.yml called it, so a branch could
-  # open a PR, be reviewed and merged with NO test result anywhere — "no checks
-  # reported" reads like a green light to anyone skimming the PR.
-  #
-  # No duplication: this workflow has no `push` trigger, so the merge commit is
-  # still tested exactly once, by the publish/release caller or by the next PR.
-  # `edited` is deliberately absent (it fires on a title change and would re-run
-  # the whole suite for nothing); `synchronize`/`reopened` are the defaults that
-  # matter.
-  pull_request:
-    branches:
-      - development
-      - master
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -41,7 +25,7 @@ jobs:
 
     steps:
       - name: 🧾 Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: 🟢 Setup Go
         uses: actions/setup-go@v6
@@ -69,9 +53,15 @@ jobs:
           GOGC: "50"
         run: go test -count=1 -timeout 15m ./...
 
-      # Every release.yml target must compile, so an OS-specific API breaks
-      # the gate on master, not the release job after a tag (v1.0.0's first
-      # run failed on windows: syscall.Setpgid).
+      - name: 🍎 macOS installer
+        run: python3 -m unittest scripts/ezllm_mac_test.py
+
+      - name: 🔄 Bridge updater
+        run: python3 -m unittest scripts/bridge_update_test.py
+
+      # Every release target (scripts/release-assets.sh) must compile, so an
+      # OS-specific API breaks the gate, not the release job after a tag (v1.0.0's
+      # first run failed on windows: syscall.Setpgid).
       - name: 🧩 Cross-build release targets
         run: |
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
@@ -92,4 +82,75 @@ jobs:
           npm ci
           npm run build -- --emptyOutDir --outDir "$RUNNER_TEMP/ezllm-web-dist"  # tsc + Vite
           node tests/check-dist.test.mjs
+          node tests/logic.test.mjs
           node scripts/check-dist.mjs dist "$RUNNER_TEMP/ezllm-web-dist"
+
+      - name: Dashboard browser regressions
+        working-directory: web
+        timeout-minutes: 10
+        run: |
+          npx playwright install --with-deps chromium
+          node tests/verify-frontend-p1.mjs
+          node tests/verify-frontend-p2.mjs
+          node tests/verify-frontend-p3.mjs
+          node tests/verify-update.mjs
+          node tests/verify-qol-pass.mjs
+          node tests/verify-settings.mjs
+          node tests/verify-first-run.mjs
+          node tests/verify-plain-words.mjs
+          node tests/verify-more.mjs
+          node tests/verify-start-subs.mjs
+          SHOT="$RUNNER_TEMP/bridges.png" node tests/verify-bridges.mjs
+
+      - name: Dashboard page regressions
+        working-directory: web
+        timeout-minutes: 15
+        env:
+          SHOTS_DIR: ${{ runner.temp }}/shots
+        run: |
+          failed=""
+          for d in analytics-order analytics-qol chat-qol chat-stream-errors combos-qol compression-qol \
+            connect-qol dashboard-qol ledger-health meta-preset neighbourhood neighbourhood-qol \
+            onboarding-poll policy-expiry preset-labels \
+            pricing-save providers-qol push-channels quota-groups railway ranges report-failures rules-partial \
+            rules-qol services-qol settings-qol stats theme; do
+            echo "::group::verify-$d"
+            node "tests/verify-$d.mjs" || failed="$failed $d"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
+
+  docker:
+    name: Docker image (build, boot, healthy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🧾 Checkout source
+        uses: actions/checkout@v7
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: 🛠️ Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ezllm:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+      - name: 🔬 Boot and wait for healthz
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/server/version.go)
+          mkdir -p "$RUNNER_TEMP/data" && chmod 777 "$RUNNER_TEMP/data"
+          docker run -d --name app --user 1000:1000 -p 127.0.0.1:20129:20129 \
+            -v "$PWD/config.example.yaml:/app/config.yaml:ro" -v "$RUNNER_TEMP/data:/data" ezllm:ci
+          for _ in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Running}}' app)" = true ] || { echo "::error::container exited"; exit 1; }
+            body=$(curl -fsS http://127.0.0.1:20129/healthz 2>/dev/null || true)
+            [ -n "$body" ] && break
+            sleep 1
+          done
+          echo "$body"
+          test "$(echo "$body" | jq -r '.status + " " + .version')" = "ok $want"
+      - name: 🧾 Container logs
+        if: always()
+        run: docker logs app || true

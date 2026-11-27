@@ -1,6 +1,6 @@
 // Package geminiweb speaks Google Gemini's WEB protocol
 // (gemini.google.com) — the reverse-engineered surface documented in
-// docs/gemini-web-design.md and ~/workspace/gemini-web-api-protocol-digest.md.
+// docs/design/gemini-web-design.md and ~/workspace/gemini-web-api-protocol-digest.md.
 //
 // M12 scope is deliberately narrow: cookie auth, session init,
 // GET_USER_STATUS (auth oracle + catalog), and streaming text generation.

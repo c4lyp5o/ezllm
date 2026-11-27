@@ -1,6 +1,6 @@
 package compress
 
-// sessionDedup removes later byte-identical duplicates from history
+// sessionDedup removes later duplicates with the same full JSON shape from history
 // (re-sent system prompts — the 92.5% documented case).
 //
 // Droppable: system messages with string or pure-text-array content and NO
@@ -39,11 +39,13 @@ func sessionDedup(msgs []any) []any {
 			out = append(out, m) // pairing carrier: never drop
 			continue
 		}
-		key := hashContent(role, mm["content"])
-		if key == "" {
-			out = append(out, m) // non-text shape: not safe to hash-drop
+		if !dedupTextOnly(mm["content"]) {
+			out = append(out, m)
 			continue
 		}
+		// Include the whole message, not just text: names, block boundaries,
+		// and cache markers are part of what the provider sees.
+		key := messageHash(mm)
 		if seen[key] {
 			out = append(out, nil) // exact duplicate of an earlier block: drop
 			continue
@@ -52,4 +54,24 @@ func sessionDedup(msgs []any) []any {
 		out = append(out, m)
 	}
 	return out
+}
+
+func dedupTextOnly(content any) bool {
+	switch c := content.(type) {
+	case string:
+		return true
+	case []any:
+		for _, block := range c {
+			b, ok := block.(map[string]any)
+			if !ok || b["type"] != "text" {
+				return false
+			}
+			if _, ok := b["text"].(string); !ok {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }

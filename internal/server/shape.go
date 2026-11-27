@@ -61,7 +61,7 @@ const maxShapeBody = 8 << 20 // 8 MiB
 // where the old byte path decoded to float64 (`1e+10`). Literal sensitivity is
 // the correct semantics for a CACHE-BREAK detector — a provider tokenizes
 // `1e10` and `10000000000` differently, so their effective prefixes differ and
-// the hash must say so. Documented in docs/single-parse-dispatch-design.md.
+// the hash must say so. Documented in docs/design/single-parse-dispatch-design.md.
 func captureShapeDoc(doc *jsonbody.BodyDoc, surface provider.Surface) shape {
 	s := shape{ReqBytes: len(doc.Bytes())}
 	if len(doc.Bytes()) == 0 || len(doc.Bytes()) > maxShapeBody {
@@ -258,7 +258,7 @@ func writeCanon(h hash.Hash, v any) {
 var canonEncoders = sync.Pool{New: func() any { return &canonEncoder{buf: make([]byte, 0, canonChunk+4<<10)} }}
 
 // sessionOf reads the operator's optional grouping key. A client that sends
-// X-Ezllm-Session (Hermes, Claude Code via a wrapper) turns per-session cost
+// X-Ezllm-Session (an agent, Claude Code via a wrapper) turns per-session cost
 // and cache reuse into a single GROUP BY; one that does not leaves it empty and
 // we fall back to time-window analysis. Never used for routing or auth.
 func sessionOf(r *http.Request) string {

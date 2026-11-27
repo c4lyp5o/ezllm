@@ -1,82 +1,32 @@
 # GitHub Copilot subscription bridge — runbook
 
-Replaces the retired OAuth/device-flow provider. The official Copilot CLI runs
-behind a loopback listener; ezllm never speaks Copilot's private API and never
-mints a session token. Design: `docs/copilot-cli-bridge-design.md`.
+How the Copilot bridge behaves, its limits and its costs. **To turn it on, follow
+[Turn on GitHub Copilot](bridges/copilot.md).** The official Copilot CLI runs behind a
+loopback listener; ezllm never speaks Copilot's private API and never mints a session
+token. Design: [copilot-cli-bridge-design.md](design/copilot-cli-bridge-design.md).
 
 ## What runs
 
 `internal/copilotbridge` serves `/healthz`, `/status`, `/v1/models` and
 `/v1/chat/completions` on `127.0.0.1:8793` (loopback only, bearer-gated with the
 bridge token). Requests use `copilot --headless --stdio` with a fresh session.
-Since 2.0.0 the warm pool is on by default and reuses only successfully
+The warm pool is on by default and reuses only successfully
 cleaned-up processes. Plain text can fall back to `copilot -p`; requests carrying
 tools or images cannot take that fallback. Prompts and native image blobs travel
 on stdin, not argv.
 
+## Boot and CLI cache
 
-## Enabling it
+Boot fails loudly if the CLI is missing or `EZLLM_COPILOT_HOME` is not a directory: a
+bridge that started without a login would look healthy while every request 401s. Every
+setting: [environment.md](environment.md).
 
-| Env | Meaning |
-|---|---|
-| `EZLLM_COPILOT_BRIDGE=on` | starts the surface |
-| `EZLLM_COPILOT_BIN` | CLI binary (default `/opt/copilot-bridge/current/copilot`) |
-| `EZLLM_COPILOT_HOME` | the bridge's own login directory (default `/copilot-sub`) |
-| `EZLLM_COPILOT_BRIDGE_ADDR` | default `127.0.0.1:8793`, must be loopback |
-| `EZLLM_COPILOT_BRIDGE_TOKEN_FILE` | shared secret (default `/data/copilot-bridge.token`); minted 0600 on first boot |
+The CLI unpacks a ~236 MB package into its cache on first run. The setup page points
+`XDG_CACHE_HOME` at `/data/copilot-cache` so that survives restarts; without it the
+bridge uses a temp dir and unpacks again every time.
 
-Compose sketch:
-
-```yaml
-    environment:
-      EZLLM_COPILOT_BRIDGE: "on"
-      EZLLM_COPILOT_HOME: /copilot-sub
-      EZLLM_COPILOT_BRIDGE_ADDR: 127.0.0.1:8793
-    volumes:
-      - /home/<user>/.local/share/copilot-bridge:/opt/copilot-bridge:ro  # bridge root
-      - /home/<user>/.copilot-sub:/copilot-sub   # the login (read-write: the CLI
-                                              # writes session state)
-      - ./data:/data
-```
-
-**Image base.** The CLI links `libstdc++`/`libgcc_s`, so the image runs on
-`distroless/cc-debian12`, not `base`. On `base` the bridge boots with
-`cli=unknown` and every turn fails with "error while loading shared libraries".
-
-**Cache directory.** The CLI unpacks a ~236 MB bundled package into its cache on
-first run, and a container uid has no home (`HOME=/`), so it fails with
-`EACCES: mkdir '/.cache'`. The bridge defaults the child's `XDG_CACHE_HOME` to a
-temp dir; set `XDG_CACHE_HOME: /data/copilot-cache` in compose so the unpack
-survives restarts.
-
-**Login.** Sign the bridge in to its own folder, `~/.copilot-sub`, never your
-everyday `~/.copilot` — the same `*-sub` layout as the Claude, Codex and
-Antigravity bridges. A personal `~/.copilot` also carries your sessions,
-plugins and IDE links, and signing out there would break the bridge. Run this
-once on the host, with the same CLI binary the bridge mounts:
-
-```sh
-env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub \
-  ~/.local/share/copilot-bridge/current/copilot login --device-code
-ls ~/.copilot-sub/config.json   # the stored login the container reads
-```
-
-Use the host path of the binary the bridge mounts. It prints a
-URL and a code; open the URL, enter the code and approve with the GitHub account
-that has the Copilot plan. Unsetting D-Bus matters on a desktop host: with a
-keyring available the CLI stores the token there, where the container cannot
-reach it; without one it writes `config.json` in `COPILOT_HOME`.
-
-Boot fails loudly if `EZLLM_COPILOT_HOME` is not a directory — a bridge that
-started without a login would look healthy while every request 401s.
-
-**Upgrading from before 2.0.0.** The default login directory changed from
-`/copilot-home` to `/copilot-sub`, and there is no fallback. Log in to
-`~/.copilot-sub` as above, change the mount to `~/.copilot-sub:/copilot-sub`,
-set `EZLLM_COPILOT_HOME: /copilot-sub` (or remove the variable to use the
-default) and recreate the container (`docker compose up -d --no-build`). A
-deployment that still mounts `/copilot-home` without setting the variable
-refuses to start, naming the missing directory.
+The bridge speaks headless protocols 3 and 4, proven live on CLI 1.0.112 and 1.0.114.
+Run [`bridge-check`](#gates-and-updates) before using any other release.
 
 ## Adding the provider
 
@@ -84,31 +34,6 @@ Providers → Add provider → **GitHub Copilot (bridge)**. No key to paste: the
 server resolves the bridge token on the key-add call (`kind: copilot-bridge`,
 base `http://127.0.0.1:8793/v1`). If the bridge is off, the add answers 409
 naming the env var.
-
-## Migrating a database that still carries an OAuth account
-
-A pre-retirement database keeps its `kind: github-copilot` account, and nothing
-stops the router from booting with it — measured on 2026-11-05 with the shipped
-binary and a planted row:
-
-- **Boot: UP.** No refusal, no warning; the account still appears in
-  `/admin/accounts` with `enabled: true`, so the dashboard looks healthy.
-- **Every request through it fails**, and this is the only signal:
-  `502 provider: unknown kind "github-copilot" (want one of [opencode-go
-  openai-compatible anthropic-compatible gemini-openai gemini-web claude-web
-  copilot-bridge])`.
-
-So the migration is not optional and it is not automatic — the old account is a
-trap that looks fine until traffic arrives. In the deploy window:
-
-1. Providers → Add provider → **GitHub Copilot (bridge)**, namespace `copilot`,
-   then Save & validate (no key to paste; the bridge must be running).
-2. Point every combo/hop that named the old account at the new one. A combo
-   referencing a dead account keeps failing even after the new one exists.
-3. Disable (or delete) the `github-copilot` account so it stops looking usable.
-4. Drive one real turn through the new hop and check `/admin/requests`: the hop
-   must show `copilot-bridge` and a usage row with a cached split. Then drive
-   one turn from a tool-using client: `/status` `client_tools` must say `native`.
 
 ## Models
 
@@ -142,7 +67,7 @@ request time:
   fresh session. Each step of a tool loop is therefore one premium request.
   Consequences:
   - Only the caller's tools are visible. The CLI's shell and file tools are not,
-    so nothing runs on this box, and a caller's tool named `bash` goes to the caller.
+    so nothing runs on the ezllm host, and a caller's tool named `bash` goes to the caller.
   - `tool_choice` none is a plain turn with no tools visible. Named and
     `required` choices are refused so another hop can enforce them.
   - Only `function` tools. Tool names may use ASCII letters, digits, underscores
@@ -153,8 +78,11 @@ request time:
     400 `chat_tools_unsupported` before anything is billed, so the router fails over
     with no cooldown. A tool the CLI cannot register gets the same 400. `/status`
     reports the boot check and the log has `copilot bridge: channel unavailable`.
-    After a CLI update that causes this, re-measure the channel and update `channelProtocolVersion`
-    (`internal/copilotbridge/channel.go`).
+    Protocols 3 and 4 are supported. Protocol 4 (CLI 1.0.113 and newer) groups the
+    `session.create` options, including the tool allowlist, so a new protocol is a
+    request-shape change to re-measure, not only a number: see `channelProtocolVersion`
+    and `nestSessionConfig` (`internal/copilotbridge/channel.go`) and the SDK's
+    [breaking changes](https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md).
 - Output token limits are refused so another hop can enforce them. No
   `response_format`, `n>1`, logprobs, or `reasoning_effort` mapping.
 - History is FLATTENED into one prompt. The caller's system text replaces the
@@ -176,7 +104,7 @@ of a tool loop. On AI-credit plans the charge follows tokens and the model, and
 
 The `-p` floor of ~13–14k tokens is the CLI's agent scaffolding (≈9.4k of it its 27
 tool schemas). Later `-p` calls would read part of it from cache. Channel turns took
-11–27 s end to end on this box, and each request spawns a new child. One short reply
+11–27 s end to end when measured, and each request spawns a new child. One short reply
 measured a model call of about 1 s, so most of a short turn's time is outside the
 model.
 
@@ -202,18 +130,23 @@ AI-credit charge in billionths of a credit.
 
 ## Gates and updates
 
-**`ezllm bridge-check copilot` exists** and is the gate to run after every
-`copilot update`:
+`ezllm bridge-check copilot` is the check to run after every CLI update. The static check
+is free:
 
+```sh
+ezllm bridge-check copilot --bin ~/.local/share/copilot-bridge/current/copilot --home ~/.copilot-sub --json
 ```
-ezllm bridge-check copilot --bin ~/.local/bin/copilot --home ~/.copilot-sub --json
-ezllm bridge-check copilot --live --json     # what promotion requires
+
+The live check, which the updater needs before it switches, spends two premium requests:
+
+```sh
+ezllm bridge-check copilot --bin ~/.local/share/copilot-bridge/current/copilot --home ~/.copilot-sub --live --json
 ```
 
 Two tiers, like the other bridges:
 
 - **Static (free, no request):** the binary resolves, `--version` reports, and the
-  undocumented `--headless --stdio` channel answers at protocol **3** and accepts
+  undocumented `--headless --stdio` channel answers at protocol **3 or 4** and accepts
   a `session.create`. That last part is the point of the check: `--headless` is
   not in `copilot --help`, so a release can move it without any version number
   moving.
@@ -232,14 +165,8 @@ environment (`env -i`, no session stores) the same call answers
 {"bridge":"copilot","ok":true,"version":"1.0.105","release":"qualified","live":true,"problems":[]}
 ```
 
-**Optional managed updates.** The host updater now supports Copilot through
-stable, digest-verified official releases and the same gate/promotion/recovery
-flow as the other bridges. It is disabled in updater defaults until you migrate
-the legacy standalone binary mount to `/opt/copilot-bridge` and point
-`EZLLM_COPILOT_BIN` at `/opt/copilot-bridge/current/copilot`. Initialization copies
-the existing binary without replacing it. Follow the
-[bridge update runbook](bridge-update-runbook.md) before enabling it.
-The live gate honors warm-pool mode and closes its workers when finished.
+**Managed updates.** The [updater](bridge-update-runbook.md) supports Copilot and is
+off for it by default; set `bridges.copilot.enabled` to turn it on. The live gate honors warm-pool mode and closes its workers when finished.
 
 **Version-sensitive:** a release that renames `session.usage_checkpoint` records
 usage as unknown (zeros). Parser fixtures in `internal/copilotbridge/bridge_test.go`
@@ -274,11 +201,11 @@ Streamed tool batches are flushed before accounting cleanup. Usage and stream
 completion still follow cleanup, so clients that wait for `[DONE]` before
 executing tools retain that wait. Do not shorten the accounting timeout based
 on first-response latency alone. Measured examples and limitations are in
-[copilot-latency-diagnostics.md](copilot-latency-diagnostics.md).
+[copilot-latency-diagnostics.md](design/copilot-latency-diagnostics.md).
 
 ## Warm CLI processes
 
-Process reuse is on by default since 2.0.0. Set
+Process reuse is on by default. Set
 `EZLLM_COPILOT_BRIDGE_WARM_POOL=off` and restart to go back to one process per
 request. Accepted enabled values are `on`, `true`, `1`, or unset; disabled
 values are `off`, `false`, `0`. Invalid values fail startup.
@@ -298,7 +225,7 @@ login changes should be followed by a restart. Shutdown drains HTTP requests
 within the existing grace period, then kills and reaps warm workers.
 
 `GET /status` exposes `runtime.pool` (`enabled`, `workers`, `idle`, `closed`) and
-`runtime.stage_timings`. Watch setup timings and memory on a small host. On this host one CLI retained approximately
+`runtime.stage_timings`. Watch setup timings and memory on a small host. On one host, one CLI retained approximately
 270–282 MiB RSS over a three-turn proof; two warm workers can therefore retain
 substantial memory. That sample does not establish a steady-state memory bound.
 The existing concurrency cap and worker expiry limit exposure. First requests
@@ -306,20 +233,20 @@ are still cold, and model processing time is unaffected by process reuse.
 
 ## Completed-conversation cache
 
-On by default since 2.0.0: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
+On by default: unset, `EZLLM_COPILOT_BRIDGE_CACHE` follows
 the warm pool. Set it to `off` to disable it; an explicit `on` with the warm
 pool off fails startup.
 A matching request must supply the unchanged prior messages and assistant answer,
 then one new user message, with the same explicit model, system and tools.
-Hermes cache markers may move without changing the actual conversation.
+Cache markers may move without changing the actual conversation.
 Only the new user turn is sent to the retained native conversation. No new
 service or worker pool is added. Each worker retains at most one completed
 session, capped at 1 MiB of normalized history and the existing expiry limits.
 
 Tool availability does not prevent reuse, but a newly emitted tool batch is
 accounted and deleted. Tool-result continuations, images, `auto`, edits and
-identical stateless retries take the fresh-session path. This mode does not yet
-cache an active Hermes tool loop. Failed cleanup or regressed usage counters
+identical stateless retries take the fresh-session path. This mode does not
+cache an active tool loop. Failed cleanup or regressed usage counters
 cannot trigger another inference automatically.
 
 The loopback `/status` reports `session_cache`; watch
@@ -330,17 +257,8 @@ hits. Setting the cache flag back to `off` and restarting restores fresh session
 while retaining process pooling. Run CLI qualification in the same configured
 mode; cache mode adds one small call to its live gate.
 
-See [the cache design and measured evidence](copilot-completed-session-cache-design.md)
+See [the cache design and measured evidence](design/copilot-completed-session-cache-design.md)
 for matching, accounting, lifecycle and experiment limits.
-
-## Shared transport status
-
-Copilot still uses its own streaming transport. **Migration to the shared
-`internal/bridgeutil` transport remains outstanding.** The current bridge
-continues operating independently; no shared lifecycle migration has shipped.
-
-Claude and Antigravity are migrated; Codex and Copilot still need expansion.
-See [shared transport status and remaining work](shared-bridge-transport-design.md).
 
 ## Image input
 

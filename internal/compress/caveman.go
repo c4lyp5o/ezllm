@@ -75,7 +75,7 @@ func caveman(msgs []any, opts map[string]any) ([]any, int) {
 			// compositions upstream, not caveman prose levels, and silently
 			// aliasing them to `standard` would make the ledger attribute
 			// savings to a level the caller never asked for
-			// (docs/compression-design.md, "Intensity").
+			// (docs/design/compression-design.md, "Intensity").
 			return msgs, 0
 		}
 	}

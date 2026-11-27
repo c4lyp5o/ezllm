@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -286,18 +285,13 @@ type chatReq struct {
 // handleChatCompletions translates one OpenAI chat turn into a gemini-web
 // generation and answers OpenAI wire (SSE when stream=true).
 func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
-	// Serialize generation per account: the cached client owns mutable
-	// session/cookie state and is not safe for concurrent use.
-	entry, unlock, err := b.resolve(r)
+	acctID, key, err := b.credentials(r)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
 		return
 	}
-	defer unlock()
-	b.maybeRotate(r.Context(), entry)
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
+	body, ok := readWebBridgeBody(w, r)
+	if !ok {
 		return
 	}
 	var req chatReq
@@ -310,7 +304,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 		return
 	}
 	// Typed refusals — the web protocol has no tool calling, no structured
-	// output, no image input (docs/gemini-web-design.md scope fences).
+	// output, no image input (docs/design/gemini-web-design.md scope fences).
 	if req.Tools != nil {
 		writeErr(w, http.StatusBadRequest, "unsupported_feature",
 			"gemini-web does not support tool calling; use a gemini-openai account for tools")
@@ -321,6 +315,18 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			"gemini-web does not support structured output (response_format)")
 		return
 	}
+	if webBridgeHasImage(req.Messages) {
+		writeErr(w, http.StatusBadRequest, "unsupported_feature",
+			"gemini-web does not support image input")
+		return
+	}
+	entry, unlock, err := b.lockClient(r.Context(), acctID, key)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "authentication_error", err.Error())
+		return
+	}
+	defer unlock()
+	b.maybeRotate(r.Context(), entry)
 	model, err := b.resolveModel(r.Context(), entry, req.Model)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "model_not_found", err.Error())
@@ -328,7 +334,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 	}
 
 	chatID := "chatcmpl-gw-" + geminiweb.NewUUID()[:13]
-	opts := geminiweb.GenerateOptions{Model: &model, Prompt: flattenMessages(req.Messages)}
+	opts := geminiweb.GenerateOptions{Model: &model, Prompt: flattenWebBridgeMessages(req.Messages)}
 
 	if !req.Stream {
 		res, err := entry.client.Generate(r.Context(), opts, func(geminiweb.Delta) {})
@@ -337,7 +343,7 @@ func (b *geminiWebBridge) handleChatCompletions(w http.ResponseWriter, r *http.R
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(openAIChatResponse(chatID, model.Name, res.Text))
+		_ = json.NewEncoder(w).Encode(webBridgeChatResponse(chatID, model.Name, res.Text))
 		return
 	}
 
@@ -415,17 +421,29 @@ func (b *geminiWebBridge) resolveModel(ctx context.Context, entry *geminiwebClie
 // returned unlock. The lock covers the cache lookup too: clientFor reads the
 // client's session state, which rotation rewrites under this same lock.
 func (b *geminiWebBridge) resolve(r *http.Request) (*geminiwebClientEntry, func(), error) {
-	acct, err := bridgeAccount(r, b.db, provider.KindGeminiWeb, provider.GeminiWebAccountHeader)
+	acctID, key, err := b.credentials(r)
 	if err != nil {
 		return nil, nil, err
 	}
+	return b.lockClient(r.Context(), acctID, key)
+}
+
+func (b *geminiWebBridge) credentials(r *http.Request) (int64, string, error) {
+	acct, err := bridgeAccount(r, b.db, provider.KindGeminiWeb, provider.GeminiWebAccountHeader)
+	if err != nil {
+		return 0, "", err
+	}
 	key, err := base64.StdEncoding.DecodeString(r.Header.Get(provider.GeminiWebKeyHeader))
 	if err != nil {
-		return nil, nil, errors.New("gemini-web bridge: malformed credential header")
+		return 0, "", errors.New("gemini-web bridge: malformed credential header")
 	}
-	lock := b.lockFor(acct.ID)
+	return acct.ID, string(key), nil
+}
+
+func (b *geminiWebBridge) lockClient(ctx context.Context, acctID int64, key string) (*geminiwebClientEntry, func(), error) {
+	lock := b.lockFor(acctID)
 	lock.Lock()
-	entry, err := b.clientFor(r.Context(), acct.ID, string(key))
+	entry, err := b.clientFor(ctx, acctID, key)
 	if err != nil {
 		lock.Unlock()
 		return nil, nil, err
@@ -453,57 +471,4 @@ func mapUpstreamStatus(err error) int {
 		return http.StatusUnauthorized
 	}
 	return http.StatusBadGateway
-}
-
-// flattenMessages joins OpenAI messages into one prompt (the web protocol
-// has no message array — a documented simplification, see the design doc).
-// System messages are dropped: they carry the client's persona/memory
-// (SOUL.md/MEMORY.md/USER.md) which must never reach a web provider.
-func flattenMessages(msgs []struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
-}) string {
-	var parts []string
-	for _, m := range msgs {
-		if m.Role == "system" {
-			continue // stealth: never forward persona/memory to web providers
-		}
-		if text := contentToText(m.Content); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func contentToText(c any) string {
-	switch v := c.(type) {
-	case string:
-		return v
-	case []any:
-		var sb strings.Builder
-		for _, p := range v {
-			if part, ok := p.(map[string]any); ok {
-				if t, ok := part["text"].(string); ok {
-					sb.WriteString(t)
-					sb.WriteString("\n")
-				}
-			}
-		}
-		return strings.TrimSpace(sb.String())
-	}
-	return ""
-}
-
-func openAIChatResponse(id, model, text string) map[string]any {
-	return map[string]any{
-		"id":      id,
-		"object":  "chat.completion",
-		"created": time.Now().Unix(),
-		"model":   model,
-		"choices": []any{map[string]any{
-			"index":         0,
-			"message":       map[string]any{"role": "assistant", "content": text},
-			"finish_reason": "stop",
-		}},
-	}
 }

@@ -33,7 +33,7 @@ func TestVSCodeAliasRoutes(t *testing.T) {
 	}
 	defer db.Close()
 
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,11 +101,11 @@ func TestVSCodeAliasEnforcesTokenBudget(t *testing.T) {
 	ctx := context.Background()
 	bucket := store.CountBucket(time.Now(), "monthly", time.Local)
 	if _, err := h.db.Writer().ExecContext(ctx,
-		`UPDATE client_tokens SET cap_tokens=100, cap_window='monthly' WHERE name='hermes'`); err != nil {
+		`UPDATE client_tokens SET cap_tokens=100, cap_window='monthly' WHERE name='my-app'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.Writer().ExecContext(ctx,
-		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('hermes', ?, 100, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
+		`INSERT INTO client_usage_counters (client, bucket, tokens, calls, updated_at) VALUES ('my-app', ?, 100, 1, '2026-01-01T00:00:00Z')`, bucket); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,7 +201,7 @@ func TestVSCodeAliasInvalidToken(t *testing.T) {
 	}
 	defer db.Close()
 
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 

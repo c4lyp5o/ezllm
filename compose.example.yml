@@ -54,6 +54,7 @@ services:
       # EZLLM_TRANSLATION_ENABLED: "true"
       # EZLLM_COMBO_AUTOPROBE: "on"
       # EZLLM_PRICE_REFRESH: "on"
+      # EZLLM_UPDATE_CHECK: "off"   # no daily check for a newer ezllm release
 
       # ── optional encrypted backups ── docs/recovery-runbook.md
       # These require the two optional mounts below. Scheduling stays off
@@ -73,7 +74,7 @@ services:
       # the CLI and a login (the two mounts at the end of `volumes`) fails the
       # boot rather than starting a surface that 401s every request.
       EZLLM_COPILOT_BRIDGE: "off"
-      # Caches are on by default (v2.0.0+); set either to "off" to disable.
+      # Caches are on by default; set either to "off" to disable.
       # EZLLM_COPILOT_BRIDGE_WARM_POOL: "off"
       # EZLLM_COPILOT_BRIDGE_CACHE: "off"
       # EZLLM_COPILOT_BIN: /opt/copilot-bridge/current/copilot
@@ -102,7 +103,7 @@ services:
       # Loopback-only; an openai-compatible account dials it. Linux only. `on`
       # without the CLI and a login (the two mounts below) fails the boot.
       EZLLM_CODEX_BRIDGE: "off"
-      # Caches by default wherever the CLI supports it (v2.0.0+); "off" opts out,
+      # Caches by default wherever the CLI supports it; "off" opts out,
       # "on" fails the boot if caching is unavailable.
       # EZLLM_CODEX_BRIDGE_CACHE: "off"
       # EZLLM_CODEX_BIN: /opt/codex-bridge/current/bin/codex
@@ -120,9 +121,8 @@ services:
       # EZLLM_AGY_BRIDGE_ADDR: 127.0.0.1:8792
       # EZLLM_AGY_BRIDGE_TOKEN_FILE: /data/agy-bridge.token
       # EZLLM_AGY_BRIDGE_CONCURRENCY: "1"
-      # Experimental caller tools via structured output; CLI needs --json-schema.
-      # EZLLM_AGY_EXPERIMENTAL_TOOLS: "on"
-      # Conversation resume is on by default wherever tools are on (v2.0.0+).
+      # Caller tools are on whenever the CLI supports --json-schema; there is
+      # nothing to set. Conversation resume is on by default wherever tools are.
       # EZLLM_AGY_BRIDGE_CACHE: "off"
 
     volumes:
@@ -143,8 +143,9 @@ services:
       # refreshes its token there). Each *_BIN default is already the
       # `current` path (/opt/<name>-bridge/current/...), so no override is
       # needed.
-      # `python3 scripts/bridge_update.py --init` creates the layout from
-      # pinned copies. A bind mount whose source is missing makes Docker
+      # `python3 scripts/bridge_update.py --init` converts older pinned mounts of
+      # a running container to this layout; it does not install a CLI. For a
+      # first install follow docs/bridge-setup.md. A bind mount whose source is missing makes Docker
       # create an empty directory, so uncomment these only when both exist.
       #
       # Claude: <root>/<version>/claude, a copy outside the CLI's own versions

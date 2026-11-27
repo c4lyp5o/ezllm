@@ -70,7 +70,7 @@ func buildV1DB(t *testing.T, path string, n int) {
 	for i := 0; i < n; i++ {
 		if _, err := raw.Exec(
 			`INSERT INTO calls (ts, client, surface, model, status, tokens_in, tokens_out)
-			 VALUES ('2026-10-05T10:00:00.000Z','hermes','openai','some-model',200,100,50)`); err != nil {
+			 VALUES ('2026-10-05T10:00:00.000Z','my-app','openai','some-model',200,100,50)`); err != nil {
 			t.Fatalf("seed v1 row: %v", err)
 		}
 	}

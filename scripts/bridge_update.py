@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unattended bridge CLI updates for Claude, Codex, Antigravity and Copilot bridges.
 
-Design: SPEC-bridge-update.md §4.4. Runs on the host (systemd timer, hourly):
+Design: docs/design/SPEC-bridge-update.md §4.4. Runs on the host (systemd timer, hourly):
 
   discover  newest release per bridge on its official channel; first sightings
             are recorded so the soak can count from them (every run)
@@ -54,6 +54,10 @@ DEFAULT_CONFIG = {
     },
 }
 
+# The wait before a promoted release that failed for an operational reason is
+# proven a second time.
+RETEST_SECONDS = 120
+
 # Per bridge: the host directories, where the bridge root and login appear in
 # the container, and the binary's path inside a version folder.
 BRIDGES = {
@@ -73,7 +77,7 @@ GATE_ENV = ["USER", "LOGNAME", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "no_proxy", "all_proxy",
             "EZLLM_CODEX_BRIDGE_CACHE",
-            "EZLLM_AGY_EXPERIMENTAL_TOOLS", "EZLLM_AGY_BRIDGE_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
+            "EZLLM_AGY_BRIDGE_CACHE", "EZLLM_COPILOT_BRIDGE_WARM_POOL",
             "EZLLM_COPILOT_BRIDGE_CACHE"]
 
 CLAUDE_BASE = "https://downloads.claude.ai/claude-code-releases"
@@ -421,9 +425,8 @@ def gate_policy(name, info):
     # Caches are on by default (2.0.0): unset follows the prerequisite flag, so
     # a candidate that would silently lose its cache is not promoted.
     if name == "agy":
-        tools = env.get("EZLLM_AGY_EXPERIMENTAL_TOOLS", "").strip().lower() == "on"
-        policy = {"caller_tools": "structured-output" if tools else "off"}
-        if switch(env.get("EZLLM_AGY_BRIDGE_CACHE", ""), tools):
+        policy = {"caller_tools": "structured-output"}
+        if switch(env.get("EZLLM_AGY_BRIDGE_CACHE", ""), True):
             policy["session_cache"] = "conversation-resume"
         return policy
     if name == "copilot":
@@ -702,77 +705,99 @@ def run(args):
                    detail="production ezllm predates bridge-check (1.6.0): cannot prove a promotion")
         return 0
 
-    # Gates can span the end of the window. Recheck before any symlink change.
-    if not args.force_window and not in_window(cfg["window"], now()):
-        for name, (root, cur, v) in passed.items():
+    # One transaction per bridge: its own swap, restart, proof and rollback. A
+    # release that fails never takes a sibling's update down with it.
+    for name, (root, cur, v) in passed.items():
+        # Gates and earlier promotions can span the end of the window, and
+        # production can be replaced meanwhile. Recheck before each symlink change.
+        if not args.force_window and not in_window(cfg["window"], now()):
             status(root, name, result="waiting", current=cur, candidate=v,
                    detail="gate passed after the update window closed; promotion deferred")
-        return 0
-    fresh = inspect(cfg["container"])
-    if (fresh.get("Id"), fresh.get("Image"), fresh["Config"], fresh["Mounts"], fresh.get("HostConfig", {}).get("NetworkMode")) != (info.get("Id"), info.get("Image"), info["Config"], info["Mounts"], info.get("HostConfig", {}).get("NetworkMode")):
-        for name, (root, cur, v) in passed.items():
+            continue
+        if production_changed(cfg, info):
             status(root, name, result="error", current=cur, candidate=v,
                    detail="production changed during qualification; run again against the current container")
-        return 0
-    state["pending"] = {name: {"previous": cur, "candidate": v} for name, (_, cur, v) in passed.items()}
+            continue
+        if not promote(name, root, cur, v, cfg, info, state, state_path, repo):
+            # The journal still holds this bridge, and production's state is
+            # unknown: nothing else may move until recovery succeeds.
+            for other in list(passed)[list(passed).index(name) + 1:]:
+                oroot, ocur, ov = passed[other]
+                status(oroot, other, result="waiting", current=ocur, candidate=ov,
+                       detail=f"gate passed; not promoted because the {name} rollback is incomplete")
+            return 2
+    return 0
+
+
+def production_changed(cfg, info):
+    fresh = inspect(cfg["container"])
+    return (fresh.get("Id"), fresh.get("Image"), fresh["Config"], fresh["Mounts"], fresh.get("HostConfig", {}).get("NetworkMode")) != (info.get("Id"), info.get("Image"), info["Config"], info["Mounts"], info.get("HostConfig", {}).get("NetworkMode"))
+
+
+def prove(name, v, cfg, info, repo):
+    """The live check in the running container, then the gateway proof script."""
+    verdict = prod_check(name, info, bcfg=cfg["bridges"][name])
+    if not verdict.get("ok"):
+        return verdict, ""
+    if verdict.get("version", v) != v:
+        raise RuntimeError("post-promotion proof reported the wrong version")
+    ok, proof = proof_script(name, cfg, repo)
+    if not ok:
+        return {"problems": [proof], "retryable": True}, proof
+    return verdict, proof
+
+
+def promote(name, root, cur, v, cfg, info, state, state_path, repo):
+    """Swap, restart, prove and commit one bridge, or restore its previous
+    version. False only when that restore did not complete."""
+    state["pending"] = {name: {"previous": cur, "candidate": v}}
     state["pending_container"] = info.get("Id")
     write_json_atomic(state_path, state)
-    proofs, policies, failures = {}, {}, {}
     phase = "symlink promotion"
     try:
-        for name, (root, cur, v) in passed.items():
-            swap_current(root, v)
+        swap_current(root, v)
         phase = "promotion restart"
         if not restart_and_wait(cfg, info):
             raise RuntimeError("ezllm did not come back healthy after promotion")
-        for name, (root, cur, v) in passed.items():
-            phase = "post-promotion check " + name
-            verdict = prod_check(name, info, bcfg=cfg["bridges"][name])
-            if verdict.get("ok"):
-                policies[name] = verdict.get("policy", {})
-                if verdict.get("version", v) != v:
-                    raise RuntimeError("post-promotion proof reported the wrong version")
-                phase = "gateway proof " + name
-                ok, proof = proof_script(name, cfg, repo)
-                if not ok:
-                    failures[name] = {"problems": [proof], "retryable": True}
+        phase = "post-promotion proof " + name
+        verdict, proof = prove(name, v, cfg, info, repo)
+        if not verdict.get("ok") and operational_failure(verdict):
+            # A provider out of capacity or a slow turn says nothing about the
+            # release, and withdrawing it costs a night: ask once more first.
+            log(f"{name}: {v} proof failed for now, testing once more in {RETEST_SECONDS}s: " + "; ".join(verdict.get("problems", []))[:200])
+            time.sleep(RETEST_SECONDS)
+            verdict, proof = prove(name, v, cfg, info, repo)
+        if not verdict.get("ok"):
+            reason = "; ".join(verdict.get("problems", []))[:300]
+            if operational_failure(verdict):
+                state["retry_after"].setdefault(name, {})[v] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
             else:
-                failures[name] = verdict
-                proof = "; ".join(verdict.get("problems", []))[:300]
-            proofs[name] = proof
-        if failures:
-            for name, verdict in failures.items():
-                v = passed[name][2]
-                reason = "; ".join(verdict.get("problems", []))[:300]
-                if operational_failure(verdict):
-                    state["retry_after"].setdefault(name, {})[v] = (now() + dt.timedelta(hours=cfg["retry_hours"])).isoformat()
-                else:
-                    state["blocked"].setdefault(name, {})[v] = "failed after promotion: " + reason
+                state["blocked"].setdefault(name, {})[v] = "failed after promotion: " + reason
             write_json_atomic(state_path, state)
-            detail = "post-promotion proof failed: " + "; ".join(f"{name}: {proofs[name]}" for name in failures)
-            return 0 if rollback_pending(cfg, info, state, state_path, detail) else 2
-        for name, (root, cur, v) in passed.items():
-            phase = "qualification record " + name
-            record_qualified(root, v, "live", proofs[name], policy=policies[name])
+            return rollback_pending(cfg, info, state, state_path, "post-promotion proof failed: " + reason)
+        phase = "qualification record " + name
+        record_qualified(root, v, "live", proof, policy=verdict.get("policy", {}))
         committed = json.loads(json.dumps(state))
-        for name, (root, cur, v) in passed.items():
-            committed["promoted_at"][name] = now().isoformat(timespec="seconds")
+        committed["promoted_at"][name] = now().isoformat(timespec="seconds")
         del committed["pending"]
         committed.pop("pending_container", None)
         phase = "transaction commit"
         write_json_atomic(state_path, committed)
-        state = committed
+        state.clear()
+        state.update(committed)
     except Exception as e:
         # Verdict JSON, docker, proof timeouts and metadata writes can all fail
-        # after current has changed. Preserve the recovery journal until every
+        # after current has changed. Preserve the recovery journal until the
         # previous version is restored and checked.
-        detail = phase + " interrupted: " + type(e).__name__
-        return 0 if rollback_pending(cfg, info, state, state_path, detail) else 2
+        return rollback_pending(cfg, info, state, state_path, phase + " interrupted: " + type(e).__name__)
 
-    for name, (root, cur, v) in passed.items():
-        status(root, name, result="updated", current=v, previous=cur, candidate=v, detail=proofs[name])
+    try:
+        status(root, name, result="updated", current=v, previous=cur, candidate=v, detail="update succeeded")
         prune(root, cfg["keep"], {current_version(root), cur})
-    return 0
+    except OSError as e:
+        # The promotion is committed; a report or cleanup error must not stop the next bridge.
+        log(f"{name}: promoted, but the report or cleanup failed ({type(e).__name__})")
+    return True
 
 
 # A typed new verdict is authoritative; the fallback supports older deployed

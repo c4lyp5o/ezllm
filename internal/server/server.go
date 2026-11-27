@@ -74,6 +74,7 @@ type DeploymentInfo struct {
 type Server struct {
 	turnChain    turnChain // response id -> turn, for stateful Responses loops
 	spendCache   sync.Map  // client name -> spendEntry (spend_cap.go)
+	quotaRefused sync.Map  // account id -> credential mark whose usage page refused it (alerts.go)
 	deployment   DeploymentInfo
 	settings     *settings.Manager
 	settingsWake chan struct{}
@@ -136,6 +137,8 @@ type Server struct {
 	// priceRefreshOn: StartPriceRefresh ran (EZLLM_PRICE_REFRESH not off),
 	// so pricing new models is wanted. Never set in unit tests: no network.
 	priceRefreshOn atomic.Bool
+	// release is the last release check (update_check.go).
+	release releaseCheck
 	// bg owns detached background work (background.go).
 	bg *background
 	// reports shares dashboard usage reports across callers (reportcache.go).
@@ -314,6 +317,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/setup", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /admin/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /v1/models", s.inferAuthed(s.handleModels))
+	s.mux.HandleFunc("GET /v1/models/{model...}", s.inferAuthed(s.handleModel))
 	// Public price catalog (infer token): current/historical rates per
 	// account+model, versioned by effective_from.
 	s.mux.HandleFunc("GET /v1/prices", s.inferAuthed(s.handleCurrentPrices))
@@ -321,6 +325,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/messages", s.inferAuthed(s.inference(provider.SurfaceAnthropic)))
 	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.inferAuthed(s.countTokens))
 	s.mux.HandleFunc("POST /v1/responses", s.inferAuthed(s.inference(provider.SurfaceResponses)))
+	// Gemini surface: Google's generateContent shape over the chat path.
+	s.mux.HandleFunc("GET /v1beta/models", s.geminiAuthed(s.handleGeminiModels))
+	s.mux.HandleFunc("GET /v1beta/models/{model...}", s.geminiAuthed(s.handleGeminiModel))
+	s.mux.HandleFunc("POST /v1beta/models/{rest...}", s.geminiAuthed(s.handleGeminiAction))
 
 	// Phase 1: New inference endpoints
 	s.mux.HandleFunc("POST /v1/embeddings", s.inferAuthed(s.inference(provider.SurfaceEmbeddings)))
@@ -346,12 +354,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /admin/settings/sessions/{id}", s.admin(s.handleRevokeSession))
 	s.mux.HandleFunc("POST /admin/settings/sessions/revoke-all", s.admin(s.handleRevokeAllSessions))
 	s.mux.HandleFunc("GET /admin/settings/diagnostics", s.admin(s.handleDiagnostics))
+	s.mux.HandleFunc("GET /admin/update", s.admin(s.handleUpdate))
 	s.mux.HandleFunc("GET /admin/backups", s.admin(s.handleBackups))
 	s.mux.HandleFunc("POST /admin/backups", s.admin(s.handleRunBackup))
 	s.mux.HandleFunc("POST /admin/settings/password", s.admin(s.handleDashboardPassword))
 
 	// ── M3 admin API (docs/API.md) ──
 	s.mux.HandleFunc("GET /admin/health", s.admin(s.handleAdminHealth))
+	s.mux.HandleFunc("GET /admin/cooldowns", s.admin(s.handleCooldowns))
+	s.mux.HandleFunc("POST /admin/route-explain", s.admin(s.handleRouteExplain))
+	s.mux.HandleFunc("DELETE /admin/cooldowns", s.admin(s.handleCooldowns))
 	s.mux.HandleFunc("GET /admin/usage", s.admin(s.handleUsage))
 	s.mux.HandleFunc("GET /admin/turns", s.admin(s.handleTurns))
 	s.mux.HandleFunc("GET /admin/overview", s.admin(s.handleOverview))
@@ -423,6 +435,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /admin/model-rules", s.admin(s.handleModelRules))
 	s.mux.HandleFunc("POST /admin/model-rules", s.admin(s.handleModelRules))
+	s.mux.HandleFunc("POST /admin/model-rules/batch", s.admin(s.handleModelRulesBatch))
 	s.mux.HandleFunc("GET /admin/model-rules/{id}", s.admin(s.handleModelRule))
 	s.mux.HandleFunc("PATCH /admin/model-rules/{id}", s.admin(s.handleModelRule))
 	s.mux.HandleFunc("DELETE /admin/model-rules/{id}", s.admin(s.handleModelRule))
@@ -441,6 +454,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin/quota", s.admin(s.handleQuotas))
 	s.mux.HandleFunc("POST /admin/keys/{keyId}/quota", s.admin(s.handleKeyQuota))
 	s.mux.HandleFunc("GET /admin/export", s.admin(s.handleExport))
+	s.mux.HandleFunc("POST /admin/import", s.admin(s.handleImport))
 
 	// Catch-all: the dashboard. Registered last, but Go's mux resolves by
 	// specificity, so every route above wins over this — the SPA and the API
@@ -517,7 +531,7 @@ func (s *Server) WrapForTest(h http.Handler) http.Handler {
 
 // ── handlers ────────────────────────────────────────────────────────────────
 
-// handleHealth is public (monitors, Traefik, the compose healthcheck), so it
+// handleHealth is public (monitors, a reverse proxy, the compose healthcheck), so it
 // reports liveness plus the release version — deliberately the ONLY extra
 // field: no DB path, counts, or uptime. Detailed stats are behind the admin
 // token at /admin/overview. The version pairing is asserted against
@@ -537,10 +551,54 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	protocol := r.URL.Query().Get("protocol")
-	entries, err := s.db.ListModelEntries(r.Context())
+	data, err := s.modelList(r.Context(), protocol)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
+	}
+	if protocol == "anthropic" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": data, "has_more": false,
+			"first_id": edgeID(data, true), "last_id": edgeID(data, false),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+// handleModel answers GET /v1/models/{model}: the one entry the list would
+// carry for that id (a "<namespace>/<model>" id or a combo name). SDKs and IDE
+// plugins read it at startup to check a configured model exists. An Anthropic
+// client (anthropic-version header, or ?protocol=anthropic) gets Anthropic's
+// shape; everyone else the OpenAI one.
+func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("model")
+	protocol := r.URL.Query().Get("protocol")
+	if protocol == "" && r.Header.Get("anthropic-version") != "" {
+		protocol = "anthropic"
+	}
+	data, err := s.modelList(r.Context(), protocol)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
+		return
+	}
+	for _, m := range data {
+		if m["id"] == id {
+			writeJSON(w, http.StatusOK, m)
+			return
+		}
+	}
+	writeErrExtra(w, http.StatusNotFound, "invalid_request_error",
+		fmt.Sprintf("The model %q does not exist or is not routable on this gateway", id),
+		map[string]any{"code": "model_not_found"})
+}
+
+// modelList builds the routable model entries (provider models, then enabled
+// combos) in the requested protocol's shape.
+func (s *Server) modelList(ctx context.Context, protocol string) ([]map[string]any, error) {
+	entries, err := s.db.ListModelEntries(ctx)
+	if err != nil {
+		return nil, err
 	}
 	data := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
@@ -571,10 +629,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// select one — the combo is invisible to that UI even though it routes.
 	// Disabled combos are omitted: the resolver refuses them, so listing one
 	// would be a lie.
-	combos, err := s.db.ListCombos(r.Context())
+	combos, err := s.db.ListCombos(ctx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "server_error", err.Error())
-		return
+		return nil, err
 	}
 	for _, c := range combos {
 		if !c.Enabled {
@@ -599,15 +656,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"combo":        map[string]any{"strategy": c.Strategy, "hops": hops},
 		})
 	}
-
-	if protocol == "anthropic" {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": data, "has_more": false,
-			"first_id": edgeID(data, true), "last_id": edgeID(data, false),
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+	return data, nil
 }
 
 // protocolMap exposes probed per-surface support so a client can tell whether a
@@ -715,7 +764,7 @@ func (s *Server) inference(surface provider.Surface) http.HandlerFunc {
 		liftDeadline()
 		lease.shrink(int64(len(body)))
 
-		// Single-parse dispatch (docs/single-parse-dispatch-design.md): one
+		// Single-parse dispatch (docs/design/single-parse-dispatch-design.md): one
 		// decode of the client body serves model extraction, compression,
 		// shape capture and every hop's model swap. Decode problems are not
 		// checked here — each consumer keeps its own documented decision
@@ -1070,7 +1119,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	if s.dispatcher != nil {
 		cooldowns = s.dispatcher.Cooldowns()
 	}
-	// Stream outcomes per hop (docs/hop-health-design.md). A hop that returns
+	// Stream outcomes per hop (docs/design/hop-health-design.md). A hop that returns
 	// 200 and then dies mid-body is healthy by every other number on this
 	// endpoint; this is the one that shows it. Window is operator-selectable
 	// because "why did last night break" and "is this hop degrading" want
@@ -1150,7 +1199,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		l, err := time.LoadLocation(v)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_request_error",
-				fmt.Sprintf("tz %q does not resolve to a time zone on this host (use an IANA name like Asia/Kuala_Lumpur)", v))
+				fmt.Sprintf("tz %q does not resolve to a time zone on this host (use an IANA name like Europe/Berlin)", v))
 			return
 		}
 		loc = l

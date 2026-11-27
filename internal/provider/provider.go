@@ -220,7 +220,7 @@ type Quota struct {
 	PercentRolling, PercentWeekly, PercentMonthly    *float64
 	RollingResetsAt, WeeklyResetsAt, MonthlyResetsAt string
 
-	// money shape (ssn-gpt / space.stationine: GET /v1/usage)
+	// money shape (initech-gpt / globex: GET /v1/usage)
 	Balance     *float64
 	BalanceUnit string
 	CostTotal   *float64

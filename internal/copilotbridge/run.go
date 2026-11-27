@@ -239,7 +239,7 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 
 	// No --allow-tool: without a permission grant the CLI cannot run its own
 	// agent tools, so a stray tool attempt is denied rather than executed
-	// against this box. That is the safe default for a chat surface.
+	// against the ezllm host. That is the safe default for a chat surface.
 	args := []string{"-s", "--output-format=json", "--no-ask-user"}
 	if model != "" && model != "auto" {
 		args = append(args, "--model", model)
@@ -251,6 +251,10 @@ func (r *Runner) run(ctx context.Context, model, prompt string, delta func(strin
 	// A grandchild holding the stdout pipe must not pin Wait (and a concurrency
 	// slot) after the kill.
 	cmd.WaitDelay = 5 * time.Second
+	// Its own process group, killed whole on cancel: a grandchild must not
+	// outlive the turn.
+	bridgeutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { bridgeutil.KillGroup(cmd); return nil }
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return Result{}, fmt.Errorf("copilot-bridge: stdout: %w", err)

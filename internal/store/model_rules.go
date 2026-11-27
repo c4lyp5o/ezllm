@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/c4lyp5o/ezllm/internal/tzloc"
 )
 
 // ErrRuleNotFound is returned when a rule does not exist (distinguishes "no
@@ -45,14 +47,17 @@ var (
 	// hhmmRE is deliberately strict: an unvalidated 'HH:MM' becomes an
 	// unparseable window the router would have to reject at request time.
 	hhmmRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
-	// tzRE accepts IANA names ('Asia/Kuala_Lumpur') and fixed offsets
-	// ('+08:00'), both of which time.LoadLocation understands.
+	// tzRE accepts IANA names ('Europe/Berlin') and fixed offsets
+	// ('+08:00'), both of which tzloc.Load resolves.
 	tzRE = regexp.MustCompile(`^(Asia/|America/|Europe/|Africa/|Australia/|Pacific/|Atlantic/|Indian/|US/|UTC|[+-][0-9]{2}:[0-9]{2})`)
 )
 
 // ValidateModelRule checks the invariant set once, so both the admin API and
 // config seeding fail identically. Returns a plain error suitable for a 400.
 func ValidateModelRule(r *ModelRule) error {
+	if r.AccountID <= 0 {
+		return errors.New("account_id is required")
+	}
 	if strings.TrimSpace(r.ModelID) == "" {
 		return errors.New("model_id is required")
 	}
@@ -109,7 +114,13 @@ func ValidateModelRule(r *ModelRule) error {
 
 	if tz := strings.TrimSpace(r.WinTZ); tz != "" {
 		if tz != "instance" && !tzRE.MatchString(tz) {
-			return fmt.Errorf("win_tz %q must be an IANA zone (Asia/Kuala_Lumpur) or offset (+08:00)", tz)
+			return fmt.Errorf("win_tz %q must be an IANA zone (Europe/Berlin) or offset (+08:00)", tz)
+		}
+		// The regex shape-checks; only the resolver knows the zone table, so a
+		// typo like Asia/Kuala_Lumpyr is refused here instead of at every
+		// request.
+		if _, err := tzloc.Load(tz); tz != "instance" && err != nil {
+			return fmt.Errorf("win_tz %q is not a time zone: %w", tz, err)
 		}
 		r.WinTZ = tz
 	} else {
@@ -159,6 +170,46 @@ func (d *DB) GetModelRule(ctx context.Context, id int64) (*ModelRule, error) {
 	return r, err
 }
 
+// UpdateModelRule saves rule id in place, so changing its account or model
+// moves this rule instead of creating a second one (UpsertModelRule keys on
+// the pair). A pair another rule has is a conflict (409).
+func (d *DB) UpdateModelRule(ctx context.Context, id int64, in ModelRule) error {
+	if err := ValidateModelRule(&in); err != nil {
+		return err
+	}
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	return d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		var other int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM model_rules WHERE account_id=? AND model_id=? AND id<>?`,
+			in.AccountID, in.ModelID, id).Scan(&other)
+		if err == nil {
+			return &ErrConflict{What: "a rule for that account and model already exists"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `
+UPDATE model_rules SET account_id=?, model_id=?, cap_tokens=?, cap_window=?,
+  win_start=?, win_end=?, win_days=?, win_tz=?, enabled=?, note=?,
+  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id=?`,
+			in.AccountID, in.ModelID, in.CapTokens, in.CapWindow,
+			nullable(in.WinStart), nullable(in.WinEnd), nullable(in.WinDays), in.WinTZ, boolInt(in.Enabled), in.Note, id)
+		if err != nil {
+			return fmt.Errorf("update model rule: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrRuleNotFound
+		}
+		return nil
+	})
+}
+
 // UpsertModelRule inserts or updates the single rule for (account, model).
 // Returns the row id so the caller can round-trip the saved record.
 func (d *DB) UpsertModelRule(ctx context.Context, in ModelRule) (int64, error) {
@@ -201,6 +252,63 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
 		return 0, fmt.Errorf("resolve model rule id: %w", err)
 	}
 	return id, nil
+}
+
+// ApplyModelRules writes many rules in one transaction: each upsert replaces
+// the rule for its (account, model) or creates it, and each id in deletes is
+// removed. Every upsert is validated before anything is written, and any
+// failure rolls the whole batch back, so a group edit never half-applies.
+// The error names the model that failed.
+func (d *DB) ApplyModelRules(ctx context.Context, upserts []ModelRule, deletes []int64) (saved, deleted int, err error) {
+	for i := range upserts {
+		if err := ValidateModelRule(&upserts[i]); err != nil {
+			return 0, 0, fmt.Errorf("%s: %w", upserts[i].ModelID, err)
+		}
+	}
+	err = d.WithWriteTx(ctx, func(tx *sql.Tx) error {
+		for _, in := range upserts {
+			var start, end, days any
+			if in.WinStart != "" {
+				start = in.WinStart
+			}
+			if in.WinEnd != "" {
+				end = in.WinEnd
+			}
+			if in.WinDays != "" {
+				days = in.WinDays
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO model_rules (account_id, model_id, cap_tokens, cap_window,
+                         win_start, win_end, win_days, win_tz, enabled, note, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+ON CONFLICT(account_id, model_id) DO UPDATE SET
+  cap_tokens=excluded.cap_tokens, cap_window=excluded.cap_window,
+  win_start=excluded.win_start, win_end=excluded.win_end,
+  win_days=excluded.win_days, win_tz=excluded.win_tz,
+  enabled=excluded.enabled, note=excluded.note,
+  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+				in.AccountID, in.ModelID, in.CapTokens, in.CapWindow,
+				start, end, days, in.WinTZ, boolInt(in.Enabled), in.Note); err != nil {
+				return fmt.Errorf("%s: %w", in.ModelID, err)
+			}
+			saved++
+		}
+		for _, id := range deletes {
+			res, err := tx.ExecContext(ctx, `DELETE FROM model_rules WHERE id = ?`, id)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return fmt.Errorf("rule %d: %w", id, ErrNotFound)
+			}
+			deleted++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return saved, deleted, nil
 }
 
 // DeleteModelRule removes a rule. Deleting a rule means "no longer restricted",

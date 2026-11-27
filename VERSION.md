@@ -3,7 +3,7 @@
 Version history for ezllm. From v1.0.0 the scheme is semantic versioning:
 MAJOR for a breaking change to the API, config or data, MINOR for a feature,
 PATCH for fixes. A release is a git tag `vX.Y.Z` that matches this file
-(`release.yml` and `docker-publish.yml` refuse a tag that does not). Before
+(`publish.yml` refuses a tag that does not). Before
 1.0.0 the scheme was one version per change date (`v0.0.1` … `v0.0.21`).
 
 The current version is served by `GET /healthz` (`version` field), shown in the
@@ -11,7 +11,26 @@ dashboard sidebar, and asserted against this file by
 `internal/server/version_test.go` — bump `internal/server/version.go` and this
 file in the same commit, or the test fails.
 
-**Current: v2.2.0**
+**Current: v2.3.0**
+
+## v2.3.0 — 2026-11-27
+
+Get started (three steps from a fresh install to a working request, with a
+subscription path), plain words with Advanced folded away, the Gemini API surface,
+ledger retention into daily totals, configuration import with a dry run, early
+warnings for quota, balance and expiring cookies, key rotation across every key of a
+provider, CSV/JSON export, the Ctrl+K palette, route explain, `rotate-master-key` and
+`token create`, a compression profile per key, `GET /v1/models/{model}`, a daily
+release check, and the Neighbourhood redesign. Schema v39.
+
+- **Breaking (env):** `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired and fails the boot;
+  Antigravity caller tools are on whenever the CLI supports `--json-schema`.
+- **Schema v39:** `calls_daily` holds the daily totals ledger retention writes. An
+  older ezllm refuses a v39 database; back up before upgrading.
+- **Alerts:** a low balance is said once per drop below the threshold; a usage page
+  that refuses its sign-in (401/403) is said once and not read again until the
+  credentials change.
+- **Copilot CLI 1.0.113+:** the bridge speaks headless protocol 4 as well as 3.
 
 ## v2.2.0 — 2026-11-20
 
@@ -95,10 +114,9 @@ Antigravity CLI updates. Schema v36.
 First release after v1.8.1, and a major version because the bridge environment
 settings changed incompatibly (see Breaking below). It consolidates the bridge caching, Codex
 conversation-fidelity, CLI updater and security-audit work that ran in
-production as pre-release builds 1.8.2 and 1.9.0–1.14.3. The security audit,
-remediation and rollout records name those builds by their pre-release numbers.
+production as pre-release builds 1.8.2 and 1.9.0–1.14.3.
 Schema v35: drops `calls.tool_prune_shadow_tokens` from the shelved tool-pruning
-experiment (its 2,875 measurements are in `docs/tool-prune-shadow-results.json`).
+experiment.
 New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
 `EZLLM_COPILOT_BRIDGE_CACHE`, `EZLLM_AGY_EXPERIMENTAL_TOOLS` and
 `EZLLM_CLAUDE_BRIDGE_CONCURRENCY` (see `docs/environment.md`).
@@ -106,7 +124,7 @@ New environment settings: `EZLLM_CODEX_BRIDGE_CACHE`, `EZLLM_AGY_BRIDGE_CACHE`,
 **Breaking:** the Copilot bridge's default login directory is now `/copilot-sub`
 (was `/copilot-home`), matching the other bridges' dedicated `*-sub` logins. Log in
 with `COPILOT_HOME=~/.copilot-sub`, mount it at `/copilot-sub` and recreate the
-container; see `docs/copilot-bridge-runbook.md`.
+container; see `docs/upgrading.md`.
 
 **Breaking:** bridge `*_BIN` defaults moved to the updater layout
 (`/opt/<bridge>-bridge/current/...`); a compose mounting a single binary at the
@@ -248,7 +266,7 @@ Claude and Antigravity share bounded streaming writes, flushing and cancellation
 through `internal/bridgeutil`. Provider event formats, auth, usage and process
 lifecycles stay local. Claude gains stalled-client write protection.
 Codex and Copilot transport migration remains outstanding; see
-[the shared transport design](docs/shared-bridge-transport-design.md).
+[the shared transport design](docs/design/shared-bridge-transport-design.md).
 
 Adds opt-in Copilot CLI process reuse with a fresh session per request. Enable
 with `EZLLM_COPILOT_BRIDGE_WARM_POOL=on`; the default remains cold processes.
@@ -264,7 +282,7 @@ oversized successful provider JSON responses. No schema migration.
 
 ## v1.7.0 — 2026-11-05
 
-MINOR by Calypso's call on a pre-1.8 line. It is not a small change though, so
+MINOR by the owner's call on a pre-1.8 line. It is not a small change though, so
 read the next sentence before deploying: **the `github-copilot` provider kind no
 longer exists.** A `config.yaml` naming it is refused, and an account row still
 carrying it fails every request (`502 provider: unknown kind "github-copilot"`)
@@ -291,11 +309,11 @@ a mismatch plain chat falls back to `-p`, and a request with tools answers
 
 Migration of an existing database is a manual three-step in the deploy window
 (add the CLI provider, re-point combos/hops, disable the old account); see
-`docs/copilot-bridge-runbook.md` § Migrating.
+`docs/upgrading.md`.
 
 ## v1.6.0 — 2026-10-31
 
-The first step toward unattended bridge CLI updates (`SPEC-bridge-update.md`
+The first step toward unattended bridge CLI updates (`docs/design/SPEC-bridge-update.md`
 M1). MINOR: a new subcommand and a new status field; no config or schema
 change; no migration.
 
@@ -717,7 +735,7 @@ the upgrade.
 - **GitHub Copilot** presents CLI 1.0.103 (GitHub's HTTP 466 floor rejected
   1.0.81-6); `GITHUB_COPILOT_CLI_VERSION` passes through compose.
 - **Deploy change:** `compose.yml` is no longer shipped. Copy
-  `compose.example.yml` to `compose.yml` (gitignored); `compose.traefik.yml` is
+  `compose.example.yml` to `compose.yml` (gitignored); the reverse-proxy overlay is
   gone. Back up your `compose.yml` before pulling.
 
 ---
@@ -770,9 +788,9 @@ on the runner instead of emulated, so arm64 costs no QEMU time.
   carries a client token as a URL segment; the log line now shows
   `/api/v1/vscode/***/…`. A reverse proxy in front must redact it too.
 - **Fix: behind a reverse proxy, one guesser no longer locks everyone out.**
-  The sign-in/setup limiter keyed on the socket peer, which behind traefik is
-  traefik for every client. `EZLLM_TRUSTED_PROXIES` names the proxies whose
-  `X-Forwarded-For` it believes; the traefik overlay sets it.
+  The sign-in/setup limiter keyed on the socket peer, which behind a reverse proxy is
+  the proxy for every client. `EZLLM_TRUSTED_PROXIES` names the proxies whose
+  `X-Forwarded-For` it believes; the proxy overlay sets it.
 - **Fix: sign-in can no longer be used to burn CPU.** Login, setup and
   password change share four concurrent bcrypt slots; past that, `429` with
   `Retry-After`.
@@ -956,9 +974,8 @@ default, and the dashboard gets a data-terminal redesign.
 - **The image build stops pretending to be multi-arch.** The container was
   built for `linux/amd64,linux/arm64`, but the arm64 half ran the whole
   `golang:1.27-alpine` + distroless + Go toolchain under QEMU emulation on
-  an amd64 runner — 7 of the 8 minutes of every push — and no host in the
-  fleet is arm64 (calypsocloud-1, Media-Server, GAME-PC and the OVH VPS are
-  all x86_64). The image is now `linux/amd64` only, the QEMU setup step is
+  an amd64 runner — 7 of the 8 minutes of every push — and no host it ran
+  on then was arm64. The image is now `linux/amd64` only, the QEMU setup step is
   gone, and the build uses the GitHub Actions layer cache
   (`cache-from`/`cache-to: type=gha,mode=max`) so the Go module download and
   the compile are cached between pushes instead of redone from scratch every
@@ -1239,7 +1256,7 @@ Performance baseline and the single-parse dispatch.
   cancellation / slow-consumer / retained-memory tests (no leak: ~1.3–2 KB/req).
 - **M10 single-parse dispatch**: one JSON decode per request through
   extractModel → Apply → captureShape → prepareHopBody (−25% e2e non-stream,
-  −26% stream at 1 MiB; design `docs/single-parse-dispatch-design.md`).
+  −26% stream at 1 MiB; design `docs/design/single-parse-dispatch-design.md`).
 - **Providers**: capacity-shaped generation failure passes with a proven key,
   sweep registry can no longer wedge, real NDJSON step chain, transient
   probe-status badge, drawer retest-all + live status.
@@ -1366,7 +1383,7 @@ Containerization, chat, and retry semantics.
   (schema v5).
 - **Web**: chat page behind the real routing path, Token Economics +
   budget-engine controls, add-provider dialog with key validation on save.
-- **Deploy**: static distroless Docker image + home-box Traefik overlay;
+- **Deploy**: static distroless Docker image + reverse-proxy overlay;
   explicit router priorities + dedicated `/admin/login` limiter; MIT license.
 - **Combos**: advertised in `/v1/models`, `enabled` honored in PATCH,
   per-combo enable toggle.

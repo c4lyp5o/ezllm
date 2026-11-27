@@ -18,7 +18,7 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
    per-milestone landmarks).
 2. Run `make test-short` before work. This is the local functional gate; CI
    separately runs formatting, vet, the full suite, cross-builds and web build.
-3. Design decisions live in `docs/*-design.md` and `docs/*-runbook.md`;
+3. Design decisions live in `docs/design/`, operation in `docs/*-runbook.md`;
    milestone narrative in `CHANGELOG.md`; dated version bumps in
    `VERSION.md`. Don't restate them from memory — open the doc.
 
@@ -33,7 +33,7 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
   RSS, and will OOM-kill or hang the shell — an agent hit this on 2026-10-23
   and lost six minutes to a package run that `-short` finishes in 106 s.
   Always use `go test -short …` or `make test-short` locally; do not run
-  `make check`, `make test`, `make test-race`, or `make perf` on this machine.
+  `make check`, `make test`, `make test-race`, or `make perf` locally.
 - **Version discipline:** bump `internal/server/version.go` and the
   `Current:` line of `VERSION.md` in the same commit. `version_test.go`
   enforces the pairing; `GET /healthz` serves the constant.
@@ -47,10 +47,19 @@ compression, a SQLite usage ledger, and an embedded operator dashboard
 - **No weakened tests.** A new fix ships with a test that fails without it;
   existing assertions are never relaxed to make a failure pass.
 
-## Memory constraint (important on this box)
+## Branches and CI
+
+- The ez standard: `development` is the integration branch (every PR targets it),
+  `master` is released code. Merging to `development` publishes `:development` to
+  GHCR; only `master` moves `:latest` (DEVELOPER.md § Branches and releases).
+- No commits, pushes, merges, tags, releases or deploys without the owner's OK.
+- App names are lowercase (`ezllm`). The dashboard's brand row is
+  `web/src/ez/Brand.tsx`, with the shared ez icon.
+
+## Memory constraint
 
 The full suite peaks at **~4.21 GiB RSS** (`TestLatencyPercentiles`). In a
-4 GiB cgroup — e.g. a Hermes worker scope — that is an OOM kill regardless of
+4 GiB cgroup that is an OOM kill regardless of
 free machine RAM or `GOMEMLIMIT` (soft limit, doesn't cap RSS). Use:
 
 ```bash
@@ -58,7 +67,7 @@ make test-short    # functional suite, ~0.18 GiB peak, skips perf harnesses
 ```
 
 CI runs the full suite separately. Details and measured numbers:
-CONTRIBUTING.md § Memory.
+DEVELOPER.md § Memory.
 
 ## Layout map
 
@@ -87,7 +96,7 @@ internal/agybridge/     Antigravity subscription surface (loopback-only): headle
 web/                React+Vite dashboard; web/tests/ = Playwright drivers
 tests/              Python live-proof scripts (not part of go test)
 scripts/            operator utilities: backup_sqlite.py (online backup), ezllm-mac.sh (macOS installer + launchd agent), bridge_update.py (bridge CLI auto-update + systemd units)
-docs/               design records + runbooks (decisions, not status)
+docs/               user docs: setup, runbooks, API; docs/design/ = design records (decisions, not status)
 ```
 
 ## Conventions
@@ -104,6 +113,17 @@ docs/               design records + runbooks (decisions, not status)
   (`{"error":{"type","message","code"}}`); refusals that name their reason
   (rules → 429, pin → 400 pinned_surface) are deliberate — keep them.
 
+## Writing docs
+
+User docs are easy, straightforward and for everyone. The models, for every ez app, are [README.md](README.md), [docs/bridges/](docs/bridges) and [docs/bridges/troubleshooting.md](docs/bridges/troubleshooting.md). Open one and match it.
+
+- **Structure**: one page or section, one job, titled with the task ("Turn on ChatGPT"). What you need, then numbered steps that start with a verb, then what success looks like ("You should see …"), then links for "Not working?" and "How it works". When setups differ, let the reader pick one up front and skip the rest. Troubleshooting is a table: *the log says* / *do this*.
+- **Tone**: talk to "you" in plain words. Explain a term the first time. Say what a step costs or changes. State a warning as a fact with its reason, right where it matters. No hype, jokes or apologies.
+- **Cadence**: short sentences, one idea each; paragraphs of one to three lines. Say what a block does, then show the block. Each block is one action that pastes whole, with no comments inside. Cut any sentence that does not help with the next step.
+- **Scope**: describe the current version only. Reasons, limits and measurements go in the runbooks, decisions in `docs/design/`, upgrade steps in [docs/upgrading.md](docs/upgrading.md).
+- **Examples** use neutral names (`acme`, `my-app`, `example.com`, `/home/you`), never anyone's real setup.
+- **Before it ships**: run every command as printed; match UI labels and log lines word for word; check that links resolve.
+
 ## Docs hygiene
 
 - Cite code as `file.go` plus the symbol (`proxy.go` `Forward`), not a line
@@ -117,7 +137,7 @@ docs/               design records + runbooks (decisions, not status)
 ## Logging
 
 The contract, the level table and the measured cost are in
-[`docs/logging.md`](docs/logging.md). The rules that must not drift:
+[`docs/design/logging-design.md`](docs/design/logging-design.md). The rules that must not drift:
 
 - **stdout only.** No log file, no rotation, no third-party logger. The
   platform captures stdout; the ledger is the durable record.

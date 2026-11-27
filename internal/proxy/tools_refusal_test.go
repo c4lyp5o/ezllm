@@ -11,7 +11,7 @@ import (
 // The Copilot CLI bridge runs its own agent loop and refuses client tool
 // schemas with a 400 coded chat_tools_unsupported. That 400 describes the HOP,
 // so a combo must fail over to a hop that takes tools instead of ending the
-// client run (measured 2026-11-05: client maxine, Copilot first in its combo,
+// client run (measured 2026-11-05: Copilot first in its combo,
 // three working hops behind it). The refused hop is not parked: it still serves
 // requests without tools.
 func TestToolsRefusalFailsOverWithoutParking(t *testing.T) {

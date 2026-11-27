@@ -23,7 +23,7 @@ type CatalogSnapshot struct {
 
 	accounts map[int64]accountAnswer
 	byNS     map[string]int64
-	// keys holds PickKey's answer per account. Nil while a key cooldown is
+	// keys holds PickKeys' answer per account. Nil while a key cooldown is
 	// live: PickKey then depends on the clock, which no write announces, so
 	// the snapshot asks the DB instead.
 	keys       map[int64]keyAnswer
@@ -39,8 +39,8 @@ type accountAnswer struct {
 }
 
 type keyAnswer struct {
-	key KeyPick
-	err error
+	keys []KeyPick
+	err  error
 }
 
 // catalogGen reads the generation counter the schema's triggers maintain.
@@ -117,7 +117,7 @@ func (d *DB) loadCatalogSnapshot(ctx context.Context, gen int64) (*CatalogSnapsh
 		a, err := d.AccountByID(ctx, id)
 		s.accounts[id] = accountAnswer{a, err}
 		if s.keys != nil {
-			k, err := d.PickKey(ctx, id)
+			k, err := d.PickKeys(ctx, id)
 			s.keys[id] = keyAnswer{k, err}
 		}
 	}
@@ -224,7 +224,21 @@ func (s *CatalogSnapshot) PickKey(ctx context.Context, accountID int64) (KeyPick
 	if !ok {
 		return KeyPick{}, ErrNotFound
 	}
-	return k.key, k.err
+	if k.err != nil {
+		return KeyPick{}, k.err
+	}
+	return k.keys[0], nil
+}
+
+func (s *CatalogSnapshot) PickKeys(ctx context.Context, accountID int64) ([]KeyPick, error) {
+	if s.keys == nil {
+		return s.db.PickKeys(ctx, accountID)
+	}
+	k, ok := s.keys[accountID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return k.keys, k.err
 }
 
 func (s *CatalogSnapshot) ModelExists(_ context.Context, accountID int64, modelID string) (bool, error) {

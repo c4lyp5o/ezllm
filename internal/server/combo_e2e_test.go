@@ -100,7 +100,7 @@ func newTwoUpstream(t *testing.T, badQuota bool, opts ...func(*Options)) *twoUps
 	idBad := mk("bad", "bad", tu.bad.URL)
 	idGood := mk("good", "good", tu.good.URL)
 
-	if err := db.UpsertClientToken(context.Background(), "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(context.Background(), "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 	// Admin role is separate from infer: POST /admin/combos must reject the

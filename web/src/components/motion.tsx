@@ -73,19 +73,6 @@ export const staggerItem = {
   show: { opacity: 1, y: 0, transition: ENTER },
 };
 
-/**
- * The table-row variant: opacity ONLY.
- *
- * A translate on a <tr> is a trap — a transform on a table row does not
- * participate in the table's own row sizing, so the row slides while the
- * cells stay put and the row visibly detaches from its own columns. A fade
- * has no such problem.
- */
-export const staggerRow = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: ENTER },
-};
-
 export function StaggerItem({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
   // `min-w-0` is load-bearing, not decoration. A grid or flex child defaults

@@ -22,3 +22,6 @@ web/.vite/
 
 # python bytecode from the live proofs
 __pycache__/
+
+# scripts/release-assets.sh output
+/release-assets/

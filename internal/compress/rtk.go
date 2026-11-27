@@ -10,7 +10,7 @@ import (
 // Contract: never mid-JSON (JSON content skipped whole), fenced regions are
 // atomic (never split), error lines always win.
 //
-// Unit algorithm (docs/compression-design.md):
+// Unit algorithm (docs/design/compression-design.md):
 //  1. skip JSON content
 //  2. split into units: plain lines + fenced regions (atomic)
 //  3. keep head keep_lines + tail keep_lines + every error-signature unit

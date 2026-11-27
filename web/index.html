@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="theme-color" content="#171719" />
     <title>ezllm</title>
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script>
       // Theme bootstrap, deliberately inline and non-module: it must run before
@@ -27,7 +28,7 @@
           root.classList.toggle('dark', t === 'dark');
           root.classList.toggle('light', t === 'light');
           var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute('content', t === 'dark' ? '#0a0a0b' : '#f6f7f9');
+          if (meta) meta.setAttribute('content', t === 'dark' ? '#171719' : '#f9fafb');
         } catch (e) {
           /* storage blocked or an exotic engine: class="dark" is already on
              <html> and `color-scheme: dark` is already the default, so the

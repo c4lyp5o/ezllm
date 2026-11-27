@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
-const TOKEN = readFileSync('/home/calypso/.hermes/secrets/ezllm-admin.token', 'utf8').trim();
-const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
+const TOKEN = readFileSync(process.env.EZLLM_TOKEN_FILE, 'utf8').trim();
+const shots = process.env.SHOTS_DIR ?? 'shots';
 const b = await chromium.launch();
 const pg = await (await b.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
 await pg.goto('http://127.0.0.1:20199/');

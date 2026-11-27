@@ -112,15 +112,20 @@ func TestChatToResponsesTable(t *testing.T) {
 			},
 		},
 		{
-			name: "chat content blocks flatten to text",
+			name: "chat content blocks: text joins, the image follows as input_image",
 			in:   `{"model":"m","max_tokens":8,"messages":[{"role":"user","content":[{"type":"text","text":"a"},{"type":"image_url","image_url":{"url":"data:x"}},{"type":"text","text":"b"}]}]}`,
 			check: func(t *testing.T, out map[string]any) {
 				input := out["input"].([]any)
-				if len(input) != 1 {
+				if len(input) != 2 {
 					t.Fatalf("input = %v", input)
 				}
 				if input[0].(map[string]any)["content"] != "a\nb" {
 					t.Errorf("content = %v", input[0])
+				}
+				img := input[1].(map[string]any)
+				parts, _ := img["content"].([]any)
+				if img["role"] != "user" || len(parts) != 1 || parts[0].(map[string]any)["type"] != "input_image" || parts[0].(map[string]any)["image_url"] != "data:x" {
+					t.Errorf("image item = %v, want a user message with one input_image part", img)
 				}
 			},
 		},

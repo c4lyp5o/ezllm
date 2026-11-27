@@ -105,9 +105,7 @@ func tagQuotaRaw(q Quota, key, val string) Quota {
 	if err := jsonUnmarshal([]byte(q.Raw), &m); err != nil || m == nil {
 		return q
 	}
-	if len(val) > 200 {
-		val = val[:200] + "…"
-	}
+	val = truncate(val, 200)
 	m[key] = val
 	if b, err := json.Marshal(m); err == nil {
 		q.Raw = string(b)

@@ -1,0 +1,173 @@
+# ez standard publish workflow, adapted for Go (version from version.go, arm64
+# images, release binaries instead of Bun release files).
+#   push to development -> test, then :development and :sha-<commit> (never
+#                          :latest or a version, so it can't replace a release)
+#   push to master      -> test, then :latest, :<version.go version>, :sha-<commit>
+#   push tag vX.Y.Z     -> test, check the tag matches version.go, then :X.Y.Z and
+#                          :vX.Y.Z, and a GitHub Release with the CHANGELOG
+#                          section plus scripts/release-assets.sh output
+# `latest` is MASTER-ONLY: a tag build once moved it to an older commit (2026-10-27).
+name: publish
+
+on:
+  push:
+    branches: [master, development]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/c4lyp5o/ezllm
+
+jobs:
+  # Before the tests, so a wrong tag fails in seconds. A prerelease suffix
+  # (v1.0.0-rc1) is allowed.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: 🧾 Checkout source
+        uses: actions/checkout@v7
+      - name: 🏷️ Version
+        id: v
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/server/version.go)
+          test -n "$version"
+          if [ "${{ github.ref_type }}" = tag ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "${tag%%-*}" != "$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match internal/server/version.go ($version)"
+              exit 1
+            fi
+            version="$tag"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: version
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: [version, test]
+    # A manual run from any other branch tests but never publishes.
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/development' || github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: 🧾 Checkout source
+        uses: actions/checkout@v7
+
+      - name: 🏷️ Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # The tags below are the whole list: no automatic `latest` on a tag.
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }},enable=${{ github.ref == 'refs/heads/master' || github.ref_type == 'tag' }}
+            type=raw,value=v${{ needs.version.outputs.version }},enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=development,enable=${{ github.ref == 'refs/heads/development' }}
+            type=sha,prefix=sha-,format=short,enable=${{ github.ref_type == 'branch' }}
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 🔑 Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🛠️ Build & push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          # The dashboard's doc links open the docs of this version.
+          build-args: |
+            DOCS_REF=${{ github.ref == 'refs/heads/development' && 'development' || format('v{0}', needs.version.outputs.version) }}
+          # No emulation: the builder stage cross-compiles and the runtime stage
+          # only copies.
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          # A failed cache export must not turn a pushed image into a red build.
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      - name: 📝 Release notes
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          awk -v h="## v${v%%-*} " 'index($0 " ", h) == 1 {f=1; next} f && /^## /{exit} f' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "See CHANGELOG.md." > release-notes.md
+
+      - name: 🟢 Setup Go (release files)
+        if: github.ref_type == 'tag'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 📦 Release files
+        if: github.ref_type == 'tag'
+        run: sh scripts/release-assets.sh "${{ github.ref_name }}"
+
+      - name: 📦 GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: release-notes.md
+          files: release-assets/*
+          fail_on_unmatched_files: true
+
+  # One message per run to the NTFY_URL topic, covering the tests as well as the
+  # publish, so a red test run is reported too.
+  notify:
+    needs: [version, test, publish]
+    if: always() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/development' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔔 Notify ntfy
+        env:
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+          APP: ${{ github.event.repository.name }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          TEST: ${{ needs.test.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          VERSION: ${{ needs.version.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$NTFY_URL" ] || { echo "NTFY_URL not set; skipping"; exit 0; }
+          case "$REF" in
+            development) tags=":development" ;;
+            master) tags=":latest, :$VERSION" ;;
+            *) tags=":$VERSION + GitHub Release" ;;
+          esac
+          if [ "$PUBLISH" = success ]; then
+            title="✅ $APP $REF published"; prio=default; emoji=white_check_mark
+            body="$IMAGE $tags (${SHA:0:7})"
+          elif [ "$TEST" != success ]; then
+            title="❌ $APP $REF: tests failed"; prio=high; emoji=x
+            body="Nothing published (${SHA:0:7})"
+          else
+            title="❌ $APP $REF: publish failed"; prio=high; emoji=x
+            body="Tests passed, image push failed (${SHA:0:7})"
+          fi
+          curl -fsS -H "Title: $title" -H "Priority: $prio" -H "Tags: $emoji,whale" \
+            -H "Click: $RUN_URL" -d "$body" "$NTFY_URL" >/dev/null || echo "::warning::ntfy post failed"

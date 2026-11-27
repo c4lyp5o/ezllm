@@ -27,9 +27,9 @@ import (
 var schemaSQL string
 
 // schemaVersion must be bumped whenever schema.sql changes incompatibly.
-const schemaVersion = 38
+const schemaVersion = 39
 
-// Stream-outcome vocabulary (schema v34, docs/hop-health-design.md). Stored in
+// Stream-outcome vocabulary (schema v34, docs/design/hop-health-design.md). Stored in
 // calls.stream_outcome; an empty value means the request was not a stream.
 // These live here
 // rather than in proxy so the ledger owns its own vocabulary and a store test
@@ -61,6 +61,9 @@ type DB struct {
 	callCh             chan ledgerItem
 	reservationCleanup chan int64
 	closeCh            chan struct{}
+	// profileCount caches how many compression profiles exist (-1 = not read
+	// yet), so a request on an instance without any skips the lookups.
+	profileCount atomic.Int64
 	// recMu orders RecordCall against Close: a row enqueued under RLock is
 	// in callCh before closeCh closes (so the final drain sees it), and a row
 	// arriving after Close sees closed and is counted as dropped.
@@ -133,6 +136,7 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 
 		closeCh: make(chan struct{}),
 	}
+	db.profileCount.Store(-1)
 	if strings.TrimSpace(opts.MasterSecret) != "" {
 		fc, err := NewFieldCrypto(opts.MasterSecret)
 		if err != nil {
@@ -1067,8 +1071,7 @@ func (d *DB) alterCallsContextTokens(ctx context.Context) error {
 
 // dropCallsToolPrune (v35) removes the v33 tool-pruning column. The feature was
 // rejected and deleted on 2026-11-05 and nothing reads or writes the column;
-// the experiment's measurements were exported to
-// docs/tool-prune-shadow-results.json before the drop. A no-op once applied and
+// the experiment's measurements were exported before the drop. A no-op once applied and
 // on databases that never had it.
 func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 	exists, err := hasTable(ctx, d.w, "calls")
@@ -1092,7 +1095,7 @@ func (d *DB) dropCallsToolPrune(ctx context.Context) error {
 }
 
 // alterCallsStreamOutcome adds the hop-health outcome column (v34,
-// docs/hop-health-design.md) on databases created before it. Same guard as the
+// docs/design/hop-health-design.md) on databases created before it. Same guard as the
 // other ADD COLUMNs: not idempotent, and a fresh database already carries it from
 // schema.sql. TEXT with an empty default keeps every historical row honest —
 // "this row predates the recording", never a guessed verdict.
@@ -1226,6 +1229,12 @@ func (d *DB) Close() error {
 }
 
 func (d *DB) closeConns() error {
+	// SQLite's advice for long-lived connections: refresh the planner's
+	// statistics for tables whose queries this session ran, before closing.
+	// Bounded, and best effort: a slow or failed optimize never blocks Close.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	_, _ = d.w.ExecContext(ctx, "PRAGMA optimize")
+	cancel()
 	e1 := d.w.Close()
 	e2 := d.r.Close()
 	return errors.Join(e1, e2)

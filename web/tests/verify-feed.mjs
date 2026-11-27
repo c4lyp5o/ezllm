@@ -4,9 +4,9 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 
 const base = "http://127.0.0.1:20199";
-const token = process.env.EZLLM_TOKEN_HERMES;
-if (!token) { console.error("EZLLM_TOKEN_HERMES not set in env"); process.exit(3); }
-const out = "/home/calypso/.hermes/cache/scratch/ezllm-verify/shots";
+const token = process.env.EZLLM_TOKEN;
+if (!token) { console.error("EZLLM_TOKEN not set in env"); process.exit(3); }
+const out = process.env.SHOTS_DIR ?? 'shots';
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch();

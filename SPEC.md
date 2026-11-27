@@ -5,11 +5,11 @@ subsequent releases. Deployment and operator-specific completion are not establi
 by this document; verify the live instance. (The plan and checklist that accompanied it
 were removed in v2.0.0 and remain in git history.)
 The requirements and commands below record the original plan, not current status.
-**Parent design:** [docs/claude-subscription-design.md](docs/claude-subscription-design.md) §6 (M2)
+**Parent design:** [docs/design/claude-subscription-design.md](docs/design/claude-subscription-design.md) §6 (M2)
 
 ## Objective
 
-Hermes agents (e.g. Max) reach `claude-sub` through ezllm and send a tool list on
+Agents reach `claude-sub` through ezllm and send a tool list on
 **every** turn. M1 rejects any request that carries `tools`, `tool_choice` or
 `parallel_tool_calls` before spawning the CLI (M1's `ParseRequest`),
 so every agent turn on this hop fails with:
@@ -24,7 +24,7 @@ client's original tool names. The CLI never executes anything. The client runs i
 tools and sends the results back in the next request, the same way it would with any
 Anthropic or OpenAI endpoint.
 
-**Users:** Hermes agents (OpenAI chat surface, `custom:ezllm-openai`, translated to
+**Users:** agents (OpenAI chat surface, `custom:ezllm-openai`, translated to
 Messages by ezllm), and Claude Code clients (Anthropic Messages, native).
 
 **Locked decisions it must keep:** 1 (only the official CLI drives the subscription),
@@ -60,7 +60,7 @@ over stdio). Claude Code CLI bind-mounted read-only, pinned to the version Task 
 ## Commands
 
 ```bash
-# focused, safe on this box (it is also the load balancer)
+# focused, safe on a shared host
 go test -short -count=1 ./internal/claudebridge/ ./cmd/ezllm/
 make test-quiet                      # functional gate, CPU/IO-throttled
 # full gate → CI only: push a non-master branch, then
@@ -70,7 +70,7 @@ python3 tests/prove_claude_bridge.py
 gofmt -l . && go vet ./...
 ```
 
-`make check` is **not** run locally (see CONTRIBUTING.md § Memory and the shared-box rule).
+`make check` is **not** run locally (see DEVELOPER.md § Memory and the shared-box rule).
 
 ## Project Structure
 
@@ -82,7 +82,7 @@ internal/claudebridge/mcp.go        B only: inert stdio MCP server + name aliasi
 internal/claudebridge/*_test.go     in-package tests (fake CLI fixtures, no real spawn)
 cmd/ezllm/claudebridge.go           /status capability string ("tools": ...)
 tests/prove_claude_bridge.py        live proof: refusal check → tool round-trip
-docs/claude-subscription-design.md  §6 M2 → SHIPPED, record of the A/B decision
+docs/design/claude-subscription-design.md  §6 M2 → SHIPPED, record of the A/B decision
 docs/claude-bridge-runbook.md       remove the chat_tools_unsupported entry, add tool notes
 CHANGELOG.md, VERSION.md, internal/server/version.go   0.0.21 → 0.0.22, same commit
 ```
@@ -116,7 +116,7 @@ if _, ok := raw["tools"]; ok && !toolsSupported(req) {
 - **Live proof:** extend `tests/prove_claude_bridge.py` with these cases: a single tool
   call; a full round-trip (call → result → final text); `tool_choice` forcing a named
   tool; a no-execution sentinel (a `write_file` tool whose target path must not exist
-  afterwards); and the Hermes path through ezllm's OpenAI surface returning
+  afterwards); and the agent path through ezllm's OpenAI surface returning
   `tool_calls` with `finish_reason: tool_calls`.
 
 ## Boundaries
@@ -142,7 +142,7 @@ if _, ok := raw["tools"]; ok && !toolsSupported(req) {
    results in no tool call.
 4. No tool executes: the live proof's sentinel file is never created, and the CLI
    reports no tools of its own in its `init` frame.
-5. Through ezllm, a Hermes-shaped OpenAI chat request with `tools` on the claude-sub
+5. Through ezllm, an agent-shaped OpenAI chat request with `tools` on the claude-sub
    combo returns `tool_calls` (this is the exact failure in the bug report, now fixed).
 6. Usage stays native and exactly one generation is billed per call, as measured
    in the ledger.
@@ -151,16 +151,16 @@ if _, ok := raw["tools"]; ok && !toolsSupported(req) {
 8. `make test-quiet` passes locally and the full CI gate is green. Docs and version are
    updated, and nothing in `*.md` is left marked stale.
 
-## Decisions (Calypso, 2026-10-21)
+## Decisions (2026-10-21)
 
 1. **Spike A first.** Build B only if A fails a must-hold property.
-2. **Max on `claude-sub` is intended to last, behind a cap.** This overrides locked
+2. **Agent traffic on `claude-sub` is intended to last, behind a cap.** This overrides locked
    decision 5 for agent traffic; the design doc records the change when M2 ships.
-   The cap must be live **before** Max is moved back (see Drain cap below).
+   The cap must be live **before** the agent is moved back (see Drain cap below).
 3. **The spike measures cache economics.** It records cache read/create across a
-   5-turn agent conversation with Max's real tool list, and that decides whether
+   5-turn agent conversation with an agent's real tool list, and that decides whether
    M3 is needed.
-4. **No interim failover.** Max stays off `claude-sub` until M2 ships.
+4. **No interim failover.** The agent stays off `claude-sub` until M2 ships.
 
 ## Drain cap (recommended: Rules, no new code)
 
@@ -189,7 +189,7 @@ does not revive `accounts.cap_tokens`.
   the rule detail, and the operator runbook documents the rules.
 
 5. **Rules confirmed for the cap. The cap value is proposed after the spike**, from
-   the measured tokens per agent turn, and Calypso approves it.
+   the measured tokens per agent turn, and the owner approves it.
 
 ## Open Questions
 

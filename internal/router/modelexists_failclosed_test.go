@@ -13,6 +13,7 @@ package router
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/c4lyp5o/ezllm/internal/provider"
@@ -21,20 +22,22 @@ import (
 // A ModelExists that errors must refuse the route: no route, no upstream call.
 type deadCatalog struct{ *fakeCatalog }
 
+var errCatalogBusy = errors.New("db busy")
+
 func (d deadCatalog) ModelExists(_ context.Context, _ int64, _ string) (bool, error) {
-	return false, errors.New("db busy")
+	return false, errCatalogBusy
 }
 
 func TestModelLookupFailureFailsClosed(t *testing.T) {
 	r := New(deadCatalog{newFake()})
-	rt, err := r.Resolve(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
+	rt, err := r.Resolve(context.Background(), "initech/gpt-6-luna", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatal("model lookup error must refuse the request, got nil — a store error would skip the existence check and burn an upstream call")
 	}
 	if rt.Account.Namespace != "" {
 		t.Fatalf("no route may be returned alongside the error, got %+v", rt.Account)
 	}
-	if !contains(err.Error(), "model lookup") {
+	if !strings.Contains(err.Error(), "model lookup") {
 		t.Fatalf("refusal must name the cause, got: %v", err)
 	}
 }
@@ -43,7 +46,7 @@ func TestModelLookupFailureFailsClosed(t *testing.T) {
 // dead store cannot turn into an upstream call there either.
 func TestModelLookupFailureFailsClosedOnCandidates(t *testing.T) {
 	r := New(deadCatalog{newFake()})
-	routes, err := r.ResolveCandidates(context.Background(), "super-ssn/gpt-6-luna", provider.SurfaceChat, "c")
+	routes, err := r.ResolveCandidates(context.Background(), "initech/gpt-6-luna", provider.SurfaceChat, "c")
 	if err == nil {
 		t.Fatalf("candidates path must refuse on a lookup error, got %d routes", len(routes))
 	}
@@ -52,11 +55,11 @@ func TestModelLookupFailureFailsClosedOnCandidates(t *testing.T) {
 	}
 }
 
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+func TestComboModelLookupFailurePreservesCause(t *testing.T) {
+	combo := dayNightCombo()
+	r := New(deadCatalog{withCombo(newFake(), combo)})
+	routes, err := r.ResolveCandidates(context.Background(), combo.Name, provider.SurfaceChat, "c")
+	if len(routes) != 0 || !errors.Is(err, errCatalogBusy) {
+		t.Fatalf("want no routes and wrapped catalog error; got %d routes, error %v", len(routes), err)
 	}
-	return false
 }

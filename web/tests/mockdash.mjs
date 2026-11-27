@@ -42,6 +42,7 @@ function defaults(path) {
     case "/admin/tokens": return [];
     case "/admin/usage": return { groups: [], totals: {} };
     case "/admin/requests": return requestsBody("BASELINE");
+    case "/admin/turns": return { rows: [], long_turn: 20 };
     case "/admin/cost": return { rows: [], totals: { usd: 0, calls: 0, unpriced_calls: 0, pricing_complete: true } };
     case "/v1/models": return { data: models.map((m) => ({ id: "mock/" + m.id })) };
     default: return [];
@@ -91,3 +92,10 @@ export function check(name, ok, detail) {
   if (!ok) failures.push(name);
 }
 export function finish() { process.exit(failures.length ? 1 : 0); }
+
+/** Opens an Advanced fold by its id (data-advanced), if it is closed. */
+export async function openAdvanced(page, id) {
+  const fold = page.locator(`details[data-advanced="${id}"]`);
+  if (!(await fold.evaluate((d) => d.open))) await fold.locator("summary").click();
+  await fold.locator("summary + div").waitFor();
+}

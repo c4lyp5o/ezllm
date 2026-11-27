@@ -12,13 +12,16 @@ import (
 // Each source wire has one event decoder. No decoder knows the destination.
 // State is per-reader; credentials, routes and source bodies never live here.
 type eventDecoder struct {
-	surface          provider.Surface
-	opts             CodecOptions
-	frames           *frameScanner
-	started          bool
-	terminal         bool
-	finish           FinishKind
-	chatRefusal      bool
+	surface     provider.Surface
+	opts        CodecOptions
+	frames      *frameScanner
+	started     bool
+	terminal    bool
+	finish      FinishKind
+	chatRefusal bool
+	// chatTextSeg numbers the chat text blocks: text after a tool call opens a
+	// new block, because the tool call closed the one before it.
+	chatTextSeg      int
 	stopSequence     *string
 	usage            UsageIR
 	rawMessagesUsage UsageIR
@@ -283,7 +286,7 @@ func (d *eventDecoder) chat(b []byte) ([]Event, error) {
 			return nil, invalidResponse("content arrived after chat finish_reason")
 		}
 		if delta.Content != "" || delta.Refusal != "" {
-			key := "chat:text"
+			key := fmt.Sprintf("chat:text:%d", d.chatTextSeg)
 			out = append(out, d.open(key, Block{Kind: BlockText}, "", 0, 0)...)
 			text := delta.Content
 			if delta.Refusal != "" {
@@ -305,6 +308,7 @@ func (d *eventDecoder) chat(b []byte) ([]Event, error) {
 					return nil, invalidResponse("tool call missing id or name")
 				}
 				out = append(out, d.open(key, Block{Kind: BlockCall, CallID: tc.ID, Name: tc.Function.Name}, "", tc.Index, 0)...)
+				d.chatTextSeg++
 			}
 			if tc.Function.Arguments != "" {
 				out = append(out, Event{Kind: EventArgumentsDelta, Key: key, Delta: tc.Function.Arguments})

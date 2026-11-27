@@ -7,7 +7,7 @@ package compress
 // URL, an identifier or a quoted string — it can only ever touch the words
 // between them.
 //
-// The design contract (docs/compression-design.md §caveman):
+// The design contract (docs/design/compression-design.md §caveman):
 //   - fenced regions are atomic and untouched (splitUnits groups them)
 //   - inline spans are replaced by placeholders that no rule pattern matches
 //   - after rewriting, every span must still be present, in order (the
@@ -59,6 +59,66 @@ var protectSpans = []*regexp.Regexp{
 	regexp.MustCompile(`\b\d{1,3}(?:,\d{3})+\b`),
 }
 
+// protectNeeds reports, for each protectSpans pattern, whether s holds the
+// characters every match of that pattern needs. Skipping a pattern that cannot
+// match leaves protect's output unchanged; one byte scan replaces up to 15
+// regex passes over plain prose. The entries follow protectSpans in order.
+func protectNeeds(s string) [15]bool {
+	var digit, upper, dot, slash, colon, at, tick, back, under, dash, dq, sq, comma, x bool
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+			digit = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+			if c == 'X' {
+				x = true
+			}
+		case c == 'x':
+			x = true
+		case c == '.':
+			dot = true
+		case c == '/':
+			slash = true
+		case c == ':':
+			colon = true
+		case c == '@':
+			at = true
+		case c == '`':
+			tick = true
+		case c == '\\':
+			back = true
+		case c == '_':
+			under = true
+		case c == '-':
+			dash = true
+		case c == '"':
+			dq = true
+		case c == '\'':
+			sq = true
+		case c == ',':
+			comma = true
+		}
+	}
+	return [15]bool{
+		colon && slash, // URL: "://"
+		dot,            // host.tld
+		at && dot,      // email
+		digit && dot,   // IPv4
+		tick,           // inline code
+		slash,          // paths
+		colon && back,  // Windows path
+		under || dash,  // snake/kebab
+		upper,          // camelCase
+		dq,             // "quoted"
+		sq,             // 'quoted'
+		digit && x,     // hex 0x..
+		digit && dot,   // versions
+		digit,          // numbers with units
+		digit && comma, // 1,000
+	}
+}
+
 // placeholder wraps a span index in NULs. \x00 is not a word character, so no
 // rule pattern using \b or [\w] can match it, and it cannot appear in the JSON
 // we ship (encoding/json escapes it as \u0000, which is still inert here
@@ -79,7 +139,11 @@ func protect(s string) (string, []string) {
 	var out strings.Builder
 	var found []span
 
-	for _, re := range protectSpans {
+	need := protectNeeds(s)
+	for i, re := range protectSpans {
+		if !need[i] {
+			continue // a character every match needs is absent: no match possible
+		}
 		for _, m := range re.FindAllStringIndex(s, -1) {
 			a, b := m[0], m[1]
 			if b <= a {

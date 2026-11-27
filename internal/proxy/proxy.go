@@ -7,7 +7,6 @@
 package proxy
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,18 +14,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime/multipart"
 	"net"
 	"net/http"
-	"net/textproto"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 	"github.com/c4lyp5o/ezllm/internal/jsonbody"
@@ -164,7 +159,12 @@ func (t *UsageTapper) Usage() *store.Usage {
 // and the later event's is the final cumulative count, zero included.
 func mergeUsageRaw(dst, src map[string]any) {
 	for k, v := range src {
+		// A later zero replaces only message_start's placeholder (0 or 1),
+		// never a real count an earlier event reported.
 		if k == "output_tokens" && v != nil {
+			if old, had := dst[k].(float64); had && old > 1 && isZeroUsage(v) {
+				continue
+			}
 			dst[k] = v
 			continue
 		}
@@ -391,403 +391,6 @@ type Dispatcher struct {
 	log *slog.Logger
 }
 
-type cooldownState struct {
-	until       time.Time
-	probeActive bool
-	// probeSince bounds a half-open probe. The probe is released when the
-	// upstream answers its HEADERS, not when its body ends, so a slow provider
-	// (measured 11-14s TTFT on opencode-go) held the gate that long and every
-	// other caller was told "all combo endpoints are in five-minute cooldown"
-	// by a hop that was NOT parked. See acquireHop/probeHold.
-	probeSince time.Time
-	// reason is the operator-facing cause ("429 rate limited", "transport
-	// error"). A parked hop writes no ledger row — the request never reaches an
-	// upstream — so this is the only place the cause can be reported.
-	reason string
-	// namespace labels the entry for /admin/health; the park key is by account
-	// id and base URL, which is not readable at a glance.
-	namespace string
-	// model is the parked hop's model, so an operator can see WHICH of an
-	// account's many models is cooling rather than just the account.
-	model string
-	// strikes counts CONSECUTIVE failures. Parking is deferred until it reaches
-	// maxStrikes so one transient blip does not remove a healthy hop for the
-	// whole cooldown window; a success resets it.
-	strikes int
-}
-
-// hopOutcome classifies one hop attempt: whether it failed, and how long the
-// hop should be parked as a result (0 = leave it available).
-//
-// failed and cooldown are separate because they answer different questions. A
-// 429 on a combo's ONLY hop is a failure with nothing to park for — cooling it
-// would strand the request, so the hop stays available and the client gets the
-// upstream's real answer instead of a synthetic refusal.
-type hopOutcome struct {
-	strikes  int
-	failed   bool
-	cooldown time.Duration
-	// clientCancelled marks an attempt that failed because the CALLER hung up.
-	// It is neither a success nor a hop failure: recording it as either one is
-	// wrong (clearing a legitimate park, or parking a healthy hop for a closed
-	// browser tab), so recordHop leaves the hop's state untouched.
-	clientCancelled bool
-	// noVerdict marks an attempt refused before any dial (the adapter knows
-	// the hop cannot serve this wire). Like a cancel it says nothing about the
-	// hop's health, so recordHop must neither park it nor clear its park.
-	noVerdict bool
-	// reason is the operator-facing cause, surfaced on /admin/health. A parked
-	// hop produces no ledger row, so without this a hop could disappear from
-	// routing with no recorded explanation anywhere.
-	reason string
-}
-
-const (
-	// defaultHopCooldown parks a hop whose failure carries neither an upstream
-	// Retry-After nor an operator duration (transport errors).
-	defaultHopCooldown = 5 * time.Minute
-
-	// maxHonouredRetryAfter bounds an upstream-supplied Retry-After. Providers
-	// may legitimately ask for an hour; honouring that blindly would remove the
-	// hop for the rest of the session. A value beyond this is treated as absent
-	// so the operator's configured duration applies instead.
-	maxHonouredRetryAfter = 15 * time.Minute
-
-	// probeHold bounds how long one half-open probe may keep an EXPIRED park
-	// closed to everyone else. The intent of the probe election is to stop a
-	// thundering herd from stampeding an endpoint whose window has just rolled
-	// over — not to serialize all traffic behind the one caller that happens to
-	// probe first. Without a bound, a probe against a slow provider blocked the
-	// endpoint for the whole upstream round-trip and callers were refused with
-	// "all combo endpoints are in five-minute cooldown" by a hop that was not
-	// parked: an expired park must not look parked.
-	probeHold = 30 * time.Second
-)
-
-// hopKey identifies one parkable hop: account + endpoint + MODEL.
-//
-// The model belongs in the key because a 429 is nearly always a per-model
-// condition — opencode-go meters each model separately, every router tiers per
-// model — while an account-only key meant ONE throttled model removed every model
-// on that account from every combo that referenced it. Measured live 2026-10-11:
-// a single unavailable opencode-go model ("Endpoint is unavailable", HTTP 429)
-// silently took all 38 of that account's models out of routing, 60s at a time,
-// which is how a free model that had served 235 calls in an afternoon shrank to a
-// few per hour. An endpoint-wide fault (transport error, 5xx) now parks each
-// model as it is tried, costing at most one extra failed attempt per model — what
-// the half-open probe would have done anyway.
-func hopKey(rt Route) string {
-	return fmt.Sprintf("%d|%s|%s", rt.Account.ID, strings.TrimRight(rt.Account.BaseURL, "/"), rt.Model)
-}
-
-// acquireHop grants one request the right to try an endpoint. A cooled endpoint
-// has exactly one half-open probe after the five-minute window; concurrent
-// callers skip it until that probe succeeds, fails, or exceeds probeHold.
-func (d *Dispatcher) acquireHop(rt Route, now time.Time) (allowed, probe bool) {
-	key := hopKey(rt)
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-	if d.cooldowns == nil {
-		return true, false
-	}
-	state, exists := d.cooldowns[key]
-	if !exists {
-		return true, false
-	}
-	// Deny only while the park is live, or while a FRESH probe is deciding the
-	// endpoint's fate. Once the window has expired and any probe is older than
-	// probeHold, the hop is eligible again: reporting a healthy endpoint as
-	// parked is worse than one extra request against a bad one, and the strike
-	// counter re-parks it on the next real failure.
-	if state.until.After(now) || (state.probeActive && now.Sub(state.probeSince) < probeHold) {
-		return false, false
-	}
-	state.probeActive = true
-	state.probeSince = now
-	d.cooldowns[key] = state
-	return true, true
-}
-
-// Cooldown is one parked endpoint as an operator should see it: which account is
-// cooling, until when, why, and whether a recovery probe is in flight.
-type Cooldown struct {
-	Namespace   string    `json:"namespace"`
-	Model       string    `json:"model"`
-	Until       time.Time `json:"until"`
-	Strikes     int       `json:"strikes"`
-	ProbeActive bool      `json:"probe_active"`
-	Reason      string    `json:"reason"`
-}
-
-// skipReason explains, in one operator-readable line, why acquireHop refused a
-// hop. Read WITHOUT the caller holding the lock so the hot path never writes to
-// a log sink while holding cooldownMu.
-func (d *Dispatcher) skipReason(rt Route, now time.Time) string {
-	key := hopKey(rt)
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-	st, ok := d.cooldowns[key]
-	if !ok {
-		return "unknown"
-	}
-	if st.until.After(now) {
-		return fmt.Sprintf("parked until %s (%s)", st.until.UTC().Format(time.RFC3339), st.reason)
-	}
-	if st.probeActive && now.Sub(st.probeSince) < probeHold {
-		return "half-open probe in flight"
-	}
-	return "unknown"
-}
-
-// Cooldowns snapshots the parks that are currently keeping traffic off an
-// endpoint (still cooling, or probing). A parked hop is INVISIBLE in the ledger
-// — the request never reaches an upstream, so no row is written — which made a
-// silently-skipped account look exactly like a broken one. This is the operator's
-// only view of it, so it reports cause as well as fact.
-func (d *Dispatcher) Cooldowns() []Cooldown {
-	now := time.Now()
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-	out := make([]Cooldown, 0, len(d.cooldowns))
-	for _, st := range d.cooldowns {
-		if !st.until.After(now) && !st.probeActive {
-			continue // expired and idle: no longer holding traffic back
-		}
-		out = append(out, Cooldown{
-			Namespace:   st.namespace,
-			Model:       st.model,
-			Until:       st.until,
-			Strikes:     st.strikes,
-			ProbeActive: st.probeActive,
-			Reason:      st.reason,
-		})
-	}
-	// Stable order: the dashboard and its tests both read this list, and a map
-	// walk would reshuffle it on every call.
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Namespace != out[j].Namespace {
-			return out[i].Namespace < out[j].Namespace
-		}
-		return out[i].Model < out[j].Model
-	})
-	return out
-}
-
-func (d *Dispatcher) releaseProbe(rt Route) {
-	key := hopKey(rt)
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-	if state, ok := d.cooldowns[key]; ok && state.probeActive {
-		state.probeActive = false
-		d.cooldowns[key] = state
-	}
-}
-
-// classifyHopPolicy decides what one hop attempt means: whether it failed,
-// and how long the hop should be parked for.
-//
-// Precedence for the park duration: an explicit upstream Retry-After wins (the
-// provider alone knows when its own window resets), then the operator's
-// cooldown.on_429/on_5xx, then the built-in default.
-//
-// hasAlternate is what keeps cooling honest. Parking a hop is an optimisation:
-// it lets the NEXT call skip straight to a hop that still has budget instead of
-// re-discovering the same 429. When this hop is the only candidate, that
-// optimisation has nothing to optimise — the choice is "try again and get a
-// real answer once the window rolls over" versus "synthesise a refusal from a
-// stale local counter". The first is strictly more useful, so a sole hop is
-// never parked for a rate limit. A hop that is genuinely broken (5xx,
-// transport error) is still parked: those failures mean "do not send traffic
-// here", which a single hop cannot escape anyway.
-func (d *Dispatcher) classifyHopPolicy(ctx context.Context, err error, status int, hdr http.Header, hasAlternate bool) hopOutcome {
-	on429, on5xx := d.on429, d.on5xx
-	if p, ok := settings.From(ctx); ok {
-		on429 = settings.Duration(p.Cooldown429)
-		on5xx = settings.Duration(p.Cooldown5xx)
-	}
-	if err != nil {
-		// The CALLER hung up (closed tab, cancelled agent run, shutdown). The
-		// dial fails with context.Canceled, which is a net.Error, so without
-		// this check it reads as a transport fault on the hop: one strike, and
-		// at the default threshold a five-minute park. Measured live: 80 such
-		// rows in seven days, and eight later requests answered "all combo
-		// endpoints are in five-minute cooldown".
-		if ctx.Err() != nil {
-			return hopOutcome{clientCancelled: true, reason: "client cancelled"}
-		}
-		if errors.Is(err, provider.ErrWireUnsupported) {
-			return hopOutcome{noVerdict: true, reason: "wire unsupported"}
-		}
-		if !retryableUpstreamError(err) {
-			return hopOutcome{} // our own fault (bad kind, bad request shape): not the hop's
-		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "transport error"}
-	}
-	switch {
-	case status == http.StatusTooManyRequests:
-		if !hasAlternate {
-			// Sole hop: fail, but do not park — a real attempt is better than a
-			// synthetic refusal once the window rolls.
-			return hopOutcome{failed: true, reason: "429 rate limited (sole hop, not parked)"}
-		}
-		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return hopOutcome{failed: true, cooldown: dur, reason: "429 rate limited (Retry-After)"}
-		}
-		if on429 > 0 {
-			return hopOutcome{failed: true, cooldown: on429, reason: "429 rate limited"}
-		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: "429 rate limited"}
-	case status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly:
-		reason := fmt.Sprintf("%d upstream error", status)
-		if dur, ok := parseRetryAfter(hdr.Get("Retry-After")); ok {
-			return hopOutcome{failed: true, cooldown: dur, reason: reason + " (Retry-After)"}
-		}
-		// 408/425 are transient by definition and share the 5xx duration: the
-		// operator configured one "hop is unhealthy" number, not two.
-		if on5xx > 0 && status >= 500 {
-			return hopOutcome{failed: true, cooldown: on5xx, reason: reason}
-		}
-		return hopOutcome{failed: true, cooldown: defaultHopCooldown, reason: reason}
-	}
-	return hopOutcome{} // 2xx, or a 4xx that describes the request rather than the hop
-}
-
-// parseRetryAfter parses the two spellings RFC 9110 allows for Retry-After:
-// delta-seconds and an HTTP-date. Anything absent, non-positive, unparseable,
-// or longer than maxHonouredRetryAfter reports false, so a bogus or hostile
-// header can neither pin a hop for a session nor be silently clamped into a
-// duration the upstream never asked for.
-func parseRetryAfter(v string) (time.Duration, bool) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0, false
-	}
-	if secs, err := strconv.Atoi(v); err == nil {
-		if secs <= 0 {
-			return 0, false
-		}
-		d := time.Duration(secs) * time.Second
-		if d > maxHonouredRetryAfter {
-			return 0, false
-		}
-		return d, true
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		d := time.Until(t)
-		if d <= 0 || d > maxHonouredRetryAfter {
-			return 0, false
-		}
-		return d, true
-	}
-	return 0, false
-}
-
-// recordHop applies the result of one hop attempt to its cooldown state.
-//
-// A success clears the hop outright — both the park and its strike count. A
-// failure banks a strike and only parks once the threshold is reached, so a
-// single transient blip does not remove a healthy hop for the whole cooldown
-// window. A failure with nothing to park for (a sole hop that 429'd) banks
-// nothing: there is no alternate to protect, so a strike could never be acted
-// on.
-func (d *Dispatcher) recordHop(rt Route, oc hopOutcome, now time.Time) {
-	key := hopKey(rt)
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-
-	if !oc.failed {
-		if oc.clientCancelled || oc.noVerdict {
-			return // neither a cancel nor a pre-dial refusal says anything about this hop
-		}
-		if d.cooldowns != nil {
-			delete(d.cooldowns, key)
-		}
-		return
-	}
-	if oc.cooldown <= 0 {
-		return
-	}
-	if d.cooldowns == nil {
-		d.cooldowns = make(map[string]cooldownState)
-	}
-	st := d.cooldowns[key]
-	st.strikes++
-	threshold := d.maxStrikes
-	if oc.strikes > 0 {
-		threshold = oc.strikes
-	}
-	if threshold < 1 {
-		threshold = 1
-	}
-	if st.strikes >= threshold {
-		st.until = now.Add(oc.cooldown)
-		st.strikes = 0
-		st.namespace = rt.Account.Namespace
-		st.model = rt.Model
-		st.reason = oc.reason
-		// Park events are rare (threshold crossings), so this stays inside the
-		// lock: it is the one line that explains an endpoint disappearing.
-		d.log.Info("hop parked",
-			"account", rt.Account.Namespace, "model", rt.Model,
-			"until", st.until.UTC().Format(time.RFC3339), "reason", oc.reason)
-	}
-	d.cooldowns[key] = st
-}
-
-// SetLimiter attaches the account-wide request-budget gate. Nil (the default)
-// disables rate gating.
-func (d *Dispatcher) SetLimiter(l *ratelimit.Limiter) {
-	d.limiter = l
-}
-
-// reserveRate takes one request from the hop's account budget.
-//
-// Called immediately before dispatch, never during resolution: the router
-// visits every hop to build the candidate list, so reserving there would charge
-// requests to hops that are never called.
-func (d *Dispatcher) reserveRate(rt Route) (bool, time.Time) {
-	if d.limiter == nil {
-		return true, time.Time{}
-	}
-	return d.limiter.Allow(rt.Account.ID, rt.Account.RateLimit, rt.Account.RateWindow)
-}
-
-// RateLimited reports that every candidate hop was out of its configured
-// request budget. This is a REFUSAL, not a gateway fault: the client should wait
-// until NextAllowed rather than treat it as an outage, which is why the server
-// answers 429 and not 502.
-type RateLimited struct {
-	Account     string
-	Limit       int64
-	Window      time.Duration
-	NextAllowed time.Time
-}
-
-func (e *RateLimited) Error() string {
-	msg := fmt.Sprintf("account %q is at its request budget (%d per %s)", e.Account, e.Limit, e.Window)
-	if !e.NextAllowed.IsZero() {
-		msg += "; next request allowed at " + e.NextAllowed.Format(time.RFC3339)
-	}
-	return msg
-}
-
-// ConfigureCooldown applies the operator's cooldown settings. A zero or negative
-// value leaves the built-in default in place, so a partial or hand-edited config
-// can never silently disable cooling.
-func (d *Dispatcher) ConfigureCooldown(on429, on5xx time.Duration, maxStrikes int) {
-	d.cooldownMu.Lock()
-	defer d.cooldownMu.Unlock()
-	if on429 > 0 {
-		d.on429 = on429
-	}
-	if on5xx > 0 {
-		d.on5xx = on5xx
-	}
-	if maxStrikes > 0 {
-		d.maxStrikes = maxStrikes
-	}
-}
-
 // NewDispatcher builds a Dispatcher. timeout governs connection/response-header
 // time only; streaming bodies are unbounded by design.
 func NewDispatcher(client *http.Client, registry *provider.Registry) *Dispatcher {
@@ -876,313 +479,6 @@ func (d *Dispatcher) SetRetries(retries int) {
 	d.retryAttempts = retries
 }
 
-// SwapModel rewrites the `model` field of a JSON request body, preserving every
-// other field (unknown provider-specific fields such as extra_body, thinking,
-// enable_thinking, tools, reasoning, previous_response_id): the new model is
-// spliced into the client's own bytes, or the body is round-tripped through a
-// map where a splice cannot normalize it (see jsonbody.SpliceModel).
-func SwapModel(body []byte, newModel string) ([]byte, string, error) {
-	if len(body) == 0 {
-		return nil, "", errors.New("proxy: empty body")
-	}
-	var m map[string]any
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber() // avoid float64 mangling of large ints
-	if err := dec.Decode(&m); err != nil {
-		return nil, "", fmt.Errorf("proxy: body is not a JSON object: %w", err)
-	}
-	// `null`, `[]`, `"str"` etc. decode without error into a nil/non-object map;
-	// assigning into a nil map panics, so reject explicitly.
-	if m == nil {
-		return nil, "", errors.New("proxy: body is not a JSON object")
-	}
-	old, _ := m["model"].(string)
-	// The same splice-or-re-marshal choice jsonbody.WithModel makes: both
-	// paths must emit identical bytes (docs/single-parse-dispatch-design.md).
-	if out, ok := jsonbody.SpliceModel(body, newModel); ok {
-		return out, old, nil
-	}
-	m["model"] = newModel
-	out, err := json.Marshal(m)
-	if err != nil {
-		return nil, old, fmt.Errorf("proxy: re-marshal: %w", err)
-	}
-	return out, old, nil
-}
-
-// IsStream reports whether the body asks for streaming (without mutating it).
-func IsStream(body []byte) bool {
-	var m struct {
-		Stream bool `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &m); err != nil {
-		return false
-	}
-	return m.Stream
-}
-
-// isMultipartBody reports whether the body looks like a multipart/form-data
-// payload (audio STT). Multipart bodies start with a boundary marker "--".
-func isMultipartBody(body []byte) bool {
-	return bytes.HasPrefix(body, []byte("--"))
-}
-
-// extractMultipartBoundary reads the boundary from the first line of a
-// multipart body ("--<boundary>\r\n").
-func extractMultipartBoundary(body []byte) string {
-	eol := bytes.IndexAny(body, "\r\n")
-	if eol < 0 {
-		return ""
-	}
-	return strings.TrimPrefix(string(body[:eol]), "--")
-}
-
-// MultipartField reads one form field's value from a raw multipart body,
-// using the same body-carried boundary the per-hop rewrite uses
-// (extractMultipartBoundary), so what the handler reads and what each hop
-// rewrites can never disagree. An absent field is ("", nil).
-func MultipartField(body []byte, name string) (string, error) {
-	if !bytes.ContainsAny(body, "\r\n") {
-		return "", errors.New("multipart body has no boundary line")
-	}
-	boundary := extractMultipartBoundary(body)
-	if boundary == "" {
-		return "", errors.New("multipart body has empty boundary")
-	}
-	mr := multipart.NewReader(bytes.NewReader(body), boundary)
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			return "", nil
-		}
-		if err != nil {
-			return "", fmt.Errorf("read multipart part: %w", err)
-		}
-		if part.FormName() == name {
-			value, err := io.ReadAll(part)
-			if err != nil {
-				return "", fmt.Errorf("read %s field: %w", name, err)
-			}
-			return strings.TrimSpace(string(value)), nil
-		}
-	}
-}
-
-// swapModelMultipart rebuilds a multipart/form-data body with the "model" form
-// field replaced by newModel. Every other part (the audio file, language,
-// prompt, etc.) is copied through byte-for-byte. The boundary is extracted
-// from the body's own first line, so no external Content-Type is needed.
-func swapModelMultipart(body []byte, newModel string) ([]byte, error) {
-	if !bytes.ContainsAny(body, "\r\n") {
-		return nil, errors.New("proxy: multipart body has no boundary line")
-	}
-	boundary := extractMultipartBoundary(body)
-	if boundary == "" {
-		return nil, errors.New("proxy: multipart body has empty boundary")
-	}
-	// Use mime/multipart to read the parts, then rebuild with the model swapped.
-	mr := multipart.NewReader(bytes.NewReader(body), boundary)
-	var out bytes.Buffer
-	mw := multipart.NewWriter(&out)
-	if err := mw.SetBoundary(boundary); err != nil {
-		return nil, fmt.Errorf("proxy: multipart boundary: %w", err)
-	}
-	var swapped bool
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("proxy: read multipart part: %w", err)
-		}
-		value, err := io.ReadAll(part)
-		if err != nil {
-			return nil, fmt.Errorf("proxy: read multipart part body: %w", err)
-		}
-		fieldName := part.FormName()
-		// Swap the model field; pass everything else through untouched.
-		if fieldName == "model" {
-			value = []byte(newModel)
-			swapped = true
-		}
-		// Preserve the original part header (filename, content-type).
-		h := textproto.MIMEHeader(part.Header)
-		w, err := mw.CreatePart(h)
-		if err != nil {
-			return nil, fmt.Errorf("proxy: create multipart part: %w", err)
-		}
-		if _, err := w.Write(value); err != nil {
-			return nil, fmt.Errorf("proxy: write multipart part: %w", err)
-		}
-	}
-	if !swapped {
-		// The request carried no model field at all: the handler resolved a
-		// service default, so APPEND the model field this hop must carry
-		// instead of refusing. A model-less multipart with no default is
-		// refused before dispatch — injection only happens for a resolved one.
-		if err := mw.WriteField("model", newModel); err != nil {
-			return nil, fmt.Errorf("proxy: write multipart model field: %w", err)
-		}
-	}
-	if err := mw.Close(); err != nil {
-		return nil, fmt.Errorf("proxy: close multipart writer: %w", err)
-	}
-	return out.Bytes(), nil
-}
-
-// isCloudflare reports whether the hop dials Cloudflare Workers AI, whose
-// image and audio models take native bodies at native paths.
-func isCloudflare(rt Route) bool {
-	return strings.Contains(rt.Account.BaseURL, "api.cloudflare.com")
-}
-
-// prepareHopBody rewrites the client's body for one hop: a byte-stable model
-// swap on the native path, or a full wire translation when the upstream wire
-// differs from the client's. The WIRE comes from EffectiveWire — the same
-// value attempt dials and commit unwraps — so a hop can never be dialed on one
-// wire while its body is encoded for another. Translation REPLACES the swap:
-// it rewrites the whole wire shape, model included, so the paths never compose.
-func prepareHopBody(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, *effortChange, error) {
-	// What THIS model accepts for reasoning_effort, from its own refusal. It
-	// runs first so both the native swap and every translation below inherit
-	// the clamped value — the client asked for a level this model names
-	// differently, and the ledger's 400s are all this one field.
-	//
-	// A clamp invalidates the shared doc: it describes bytes we no longer send,
-	// so the native path re-parses the clamped body instead of splicing the
-	// model into the original. That costs one parse on the rare changed path,
-	// and only a byte scan on a body that does not carry the field.
-	var change *effortChange
-	if clamped, c := clampReasoning(body, rt.Reasoning); c != nil {
-		body, change, doc = clamped, c, nil
-	}
-	out, err := prepareHopBodyWire(body, rt, doc)
-	return out, change, err
-}
-
-// prepareHopBodyWire is prepareHopBody without the reasoning clamp: the model
-// swap and the wire translation. Split so the clamp can report what it changed
-// without threading a return value through every branch below.
-func prepareHopBodyWire(body []byte, rt Route, doc *jsonbody.BodyDoc) ([]byte, error) {
-	// Google AI Studio native audio (TTS/STT) needs a generateContent
-	// translation, not the OpenAI envelope. It runs before the multipart
-	// branch because the STT input IS multipart and must be unwrapped.
-	if isGeminiNativeAudio(rt, rt.Surface) {
-		return geminiAudioRequest(body, rt.Surface)
-	}
-	// Cloudflare uses native TTS payloads: Deepgram Aura takes "text",
-	// while MeloTTS takes "prompt", not the OpenAI input envelope.
-	if rt.Surface == provider.SurfaceAudioTTS && isCloudflare(rt) {
-		var in struct {
-			Input string `json:"input"`
-			Text  string `json:"text"`
-		}
-		if err := json.Unmarshal(body, &in); err != nil {
-			return nil, fmt.Errorf("proxy: cloudflare tts body: %w", err)
-		}
-		text := in.Input
-		if text == "" {
-			text = in.Text
-		}
-		field := "prompt"
-		if strings.HasPrefix(rt.Model, "@cf/deepgram/aura-") {
-			field = "text"
-		}
-		return json.Marshal(map[string]any{field: text})
-	}
-	// Cloudflare flux-2 models require a multipart body (prompt as a form
-	// field) rather than the JSON envelope. Build it here so the proxy's
-	// content-type detection picks up the boundary.
-	if rt.Surface == provider.SurfaceImagesGen && isCloudflare(rt) && strings.Contains(rt.Model, "flux-2") {
-		var in struct {
-			Prompt string `json:"prompt"`
-		}
-		if err := json.Unmarshal(body, &in); err != nil {
-			return nil, fmt.Errorf("proxy: cloudflare image body: %w", err)
-		}
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		if err := mw.WriteField("prompt", in.Prompt); err != nil {
-			return nil, err
-		}
-		if err := mw.Close(); err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), nil
-	}
-	// Cloudflare Workers AI image models (non-flux-2) are native: the model is
-	// in the URL and the JSON body accepts ONLY prompt-like fields.
-	if rt.Surface == provider.SurfaceImagesGen && isCloudflare(rt) {
-		var in struct {
-			Prompt string `json:"prompt"`
-			Seed   any    `json:"seed"`
-		}
-		if err := json.Unmarshal(body, &in); err != nil {
-			return nil, fmt.Errorf("proxy: cloudflare image body: %w", err)
-		}
-		out := map[string]any{"prompt": in.Prompt}
-		if in.Seed != nil {
-			out["seed"] = in.Seed
-		}
-		return json.Marshal(out)
-	}
-	// Multipart (audio STT): the model lives in a form field, not a JSON key,
-	// and SwapModel is JSON-only. Rebuild the multipart body with the model
-	// field swapped; everything else (the audio file part) passes through
-	// byte-for-byte.
-	if isMultipartBody(body) {
-		return swapModelMultipart(body, rt.Model)
-	}
-	wire := rt.EffectiveWire()
-	if wire != rt.Surface {
-		// The three NEW cells ride the strict surface-neutral codecs; an
-		// unsupported request feature is a typed refusal BEFORE any upstream
-		// call (zero spend): the candidate loop skips the hop.
-		if translate.IsUniversalCell(rt.Surface, wire) {
-			return translate.RequestUniversal(body, rt.Surface, wire, rt.Model)
-		}
-		// Legacy cells keep their characterized converters.
-		switch {
-		case wire == provider.SurfaceChat:
-			return translate.Request(body, rt.Model)
-		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceAnthropic:
-			return translate.AnthropicToResponses(body, rt.Model)
-		case wire == provider.SurfaceResponses && rt.Surface == provider.SurfaceChat:
-			return translate.ChatToResponses(body, rt.Model)
-		}
-		// A cross-wire pair with no converter must never fall through to the
-		// model swap: that would send the client's own shape to a wire that
-		// cannot read it.
-		return nil, fmt.Errorf("proxy: no request converter for %s client on the %s wire", rt.Surface, wire)
-	}
-	// Native: same shape on both ends, only the model id is swapped. When the
-	// caller already decoded the body once (single-parse dispatch), mutate
-	// that shared map instead of decoding again; a nil doc falls back to the
-	// legacy self-contained decode. Both paths emit byte-identical bodies.
-	if doc != nil {
-		return doc.WithModel(rt.Model)
-	}
-	swapped, _, err := SwapModel(body, rt.Model)
-	return swapped, err
-}
-
-// universalCodecOptions builds the strict codec options for a universal cell.
-// When the UPSTREAM speaks Messages, the account's usage convention (schema
-// v13) says what the upstream's own input_tokens means; auto reads as
-// exclusive, as it does in the ledger.
-func universalCodecOptions(rt Route) (translate.CodecOptions, error) {
-	opts := translate.CodecOptions{}
-	if rt.EffectiveWire() == provider.SurfaceAnthropic {
-		conv, err := translate.UsageConventionOf(rt.Account.UsageConvention)
-		if err != nil {
-			return opts, err
-		}
-		opts.MessagesUsage = conv
-	}
-	return opts, nil
-}
-
 // streamOutcomeFrom maps a translated reader's terminal state onto the
 // delivery outcome hop-health reads. An undrained reader (the client went
 // away mid-stream) reports unknowable rather than failed: a client
@@ -1232,7 +528,7 @@ func (d *Dispatcher) attempt(ctx context.Context, r *http.Request, rt Route, bod
 	case provider.SurfaceImagesGen, provider.SurfaceAudioTTS, provider.SurfaceAudioSTT:
 		if isCloudflare(rt) {
 			base := strings.TrimSuffix(strings.TrimSuffix(rt.Account.BaseURL, "/"), "/v1")
-			url = base + "/run/" + rt.Model
+			url = base + "/run/" + modelPath(rt.Model)
 		}
 	}
 
@@ -1411,7 +707,11 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	cw, cross := crossWireFor(rt)
 
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
-	if res.Stream && isSSE {
+	// An error status takes the buffered path even when the upstream labels it
+	// a stream: some gateways answer 429 or 400 as text/event-stream, and on
+	// a translated hop the stream reader would re-shape an error body as if it
+	// were answer chunks, skipping the error re-shaping below.
+	if res.Stream && isSSE && resp.StatusCode < 400 {
 		// A translated stream wraps the body BEFORE any byte is copied: the
 		// client sees its own event shape synthesized from the upstream's, and
 		// the independent source tap retains the upstream accounting before any
@@ -1486,6 +786,12 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 				res.Err = "translated stream " + res.StreamOutcome
 			}
 		}
+	} else if resp.StatusCode < 400 && !cross && isBinaryMedia(resp.Header.Get("Content-Type")) {
+		// Audio, video and other binary answers pass straight through as they
+		// arrive: speech starts playing before generation ends, and a large
+		// file is never held whole in memory. They carry no JSON usage to tap
+		// and nothing to translate.
+		streamBinary(w, resp, &res)
 	} else {
 		// Non-streamed: read the body once, tap usage, then write it out.
 		// The extra byte detects a body that outgrew maxBodyBytes: a
@@ -1533,6 +839,9 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 						res.Err = upstreamErrorSnippet(res.Status, raw)
 					}
 					raw = cw.reshape(raw)
+					if isSSE {
+						w.Header().Set("Content-Type", "application/json")
+					}
 				}
 			} else {
 				terr := cw.optsErr
@@ -1568,6 +877,58 @@ func (d *Dispatcher) commit(ctx context.Context, w http.ResponseWriter, resp *ht
 	}
 	res.Totalms = msPtr(time.Since(start))
 	return res, nil
+}
+
+// isBinaryMedia reports a response body that is media, not JSON: it can be
+// passed through as it arrives.
+func isBinaryMedia(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "image/") || ct == "application/octet-stream"
+}
+
+// binaryChunk is the pass-through read size for binary media.
+const binaryChunk = 32 << 10
+
+// streamBinary copies a successful media body to the client chunk by chunk,
+// flushing each one. The status is committed before the first byte, so a
+// failure after that is recorded in the ledger instead of changing the status.
+// TTFT stays unset: the dashboard's TTFT medians are for text answers.
+func streamBinary(w http.ResponseWriter, resp *http.Response, res *Result) {
+	res.Committed = true
+	w.WriteHeader(resp.StatusCode)
+	fl, _ := w.(http.Flusher)
+	buf := make([]byte, binaryChunk)
+	var total int64
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			total += int64(n)
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				res.Err = "client write: " + werr.Error()
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			// The client already has a 200 and part of the file.
+			res.Err = "stream truncated: " + rerr.Error()
+			res.StreamOutcome = StreamOutcomeTruncated
+			return
+		}
+	}
+	if total == 0 && resp.StatusCode == http.StatusOK {
+		res.Err = "upstream returned an empty body"
+		res.StreamOutcome = StreamOutcomeTruncated
+	}
 }
 
 // Forward sends the (already model-swapped) body upstream and copies the
@@ -1655,149 +1016,6 @@ func (d *Dispatcher) retryAttempt(ctx context.Context, r *http.Request, rt Route
 	return lastResp, lastResult, lastStart, errors.New("proxy: retry budget exhausted")
 }
 
-// retryableUpstreamStatus reports whether an upstream answer is worth retrying
-// on the SAME hop.
-//
-// 429 is deliberately absent. A rate limit is not a transient glitch: the
-// upstream has just told us this credential has no budget left in the current
-// window, so an immediate retry spends MORE of the very budget being reported
-// and guarantees the next answer is another 429. Retrying a rate-limited key is
-// what turns "one call over budget" into "the whole minute gone".
-//
-// 429 is still a FAILOVER signal — see failoverStatus, which includes it, so a
-// different hop with budget can serve the request. Retry and failover are
-// different questions and must not share a predicate.
-func retryableUpstreamStatus(code int) bool {
-	return code == http.StatusRequestTimeout || code == http.StatusTooEarly || code >= 500
-}
-
-func retryableUpstreamError(err error) bool {
-	var netErr net.Error
-	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr)
-}
-
-// failoverStatus reports whether an upstream answer means "that hop couldn't
-// serve it, another one might" rather than "the request itself is wrong".
-//
-// 400/413/422 are deliberately excluded: they describe the BODY, which we are
-// about to replay byte-identical to the next hop — retrying would burn every
-// key in the combo to get the same rejection. 401/403/404/429 and 5xx are
-// hop-specific (bad key, model absent on that account, quota, outage) and are
-// exactly what failover exists to survive.
-func failoverStatus(code int) bool {
-	switch code {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
-		http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests,
-		http.StatusInternalServerError, http.StatusBadGateway,
-		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true
-	}
-	return code >= 500
-}
-
-// refusesWire reports a 4xx whose body says the hop cannot serve this wire
-// at all (opencode-go's ModelProtocolUnsupported on /v1/messages). Unlike an
-// ordinary 400 it describes the hop, not the body, so another hop can serve
-// the identical request. The peeked prefix is restored, so the response stays
-// committable as the final fallback.
-func refusesWire(resp *http.Response) bool {
-	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	// Only the vendor's explicit capability words count: ErrorCause also maps
-	// "does not allow" here, which on a 400 can just as well describe a body.
-	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	return strings.Contains(s, "modelprotocolunsupported") ||
-		strings.Contains(s, "not supported for format") ||
-		strings.Contains(s, "unsupported_api_for_model")
-}
-
-// refusesHistory reports a 400 whose body says the hop cannot serve this
-// CONVERSATION: a thinking model demanding the reasoning of every earlier
-// assistant turn, in a history another model produced. Like refusesWire it is a
-// fact about the hop, not our body — the identical bytes are fine for a hop of
-// the model's own family — so the dispatcher fails over instead of committing a
-// 400 that ends a client run.
-//
-// It is deliberately NOT a park: the hop is healthy for conversations it started
-// itself, and the refusal says nothing about its availability.
-func refusesHistory(resp *http.Response) bool {
-	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	return strings.Contains(s, "must be passed back to the api") ||
-		strings.Contains(s, "needs the reasoning of every")
-}
-
-// refusesTools reports a 400 from a hop that cannot honor requested tools or
-// parameters: the Copilot CLI bridge refuses `tools` by name (code
-// chat_tools_unsupported) when the CLI's tool channel is missing or at another
-// protocol version, or a tool cannot be registered. It describes the HOP, not the body, so a
-// hop that does support tools can serve the identical request — committing the
-// 400 instead ended the client run with three working hops left in the combo
-// (measured 2026-11-05, client maxine).
-//
-// Like refusesHistory it is NOT a park: the hop can serve other requests, and
-// the refusal says nothing about its availability.
-func refusesTools(resp *http.Response) bool {
-	if resp == nil || resp.Body == nil || resp.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	s := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	return strings.Contains(s, "chat_tools_unsupported") || strings.Contains(s, "chat_parameter_unsupported")
-}
-
-// deniesModelAccess reports a 401/403 whose body says the HOP cannot reach the
-// model it was asked for ("Access to model denied", "model access denied",
-// "does not have access to"). Measured 2026-10-23: an account answered 403 for
-// one model, was re-dialled on all 12 remaining requests of its block, and
-// every one of them fell over to a hop whose prompt cache hit 27% instead of
-// 98% — the wasted dial is cheap, the cache it forces is not.
-//
-// Deliberately narrow: the words must name MODEL access. A 403 that describes
-// the request (a policy on the body, a bad tool shape) keeps its old treatment
-// — fail over, leave hop health alone — because parking a healthy hop on a
-// caller's mistake is worse than one wasted round trip. The park is keyed by
-// account+base+model (hopKey), so only that one model stops being dialled.
-func deniesModelAccess(resp *http.Response) bool {
-	if resp == nil || resp.Body == nil {
-		return false
-	}
-	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
-		return false
-	}
-	body := strings.ToLower(string(peekBody(resp, maxErrPeek)))
-	for _, phrase := range []string{
-		"access to model denied",
-		"model access denied",
-		"does not have access to",
-		"no access to model",
-	} {
-		if strings.Contains(body, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-// peekBody reads up to n bytes of resp's body and puts them back in front of
-// the rest, so the response stays committable byte-for-byte. The restored
-// body still closes the ORIGINAL one: wrapping it in io.NopCloser (as both
-// peekers used to) dropped Close, and a response abandoned before EOF then
-// held its upstream connection.
-func peekBody(resp *http.Response, n int) []byte {
-	head := make([]byte, n)
-	k, _ := io.ReadFull(resp.Body, head) // a short body yields ErrUnexpectedEOF; k holds what there was
-	if k > 0 {
-		resp.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(bytes.NewReader(head[:k]), resp.Body), resp.Body}
-	}
-	return head[:k]
-}
-
 // ForwardCandidates tries routes in order and commits the first one that the
 // client may see. This is combo failover.
 //
@@ -1864,6 +1082,21 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	// refusal is the first typed translation refusal: the answer when every
 	// hop was skipped and none was even cooling for a better reason.
 	var refusal error
+	// contextSkips counts hops skipped because the request is larger than
+	// their declared context window, so the final error can say so instead of
+	// blaming a cooldown that never happened.
+	contextSkips := 0
+	// failedEndpoints holds, per endpointKey, why that model already failed on
+	// one of the account's keys for a reason no other key would change (a 5xx,
+	// a transport error, a bad request). Its sibling keys are skipped instead
+	// of dialed: they would fail the same way and spend the attempt budget.
+	var failedEndpoints map[string]string
+	markEndpoint := func(rt Route, why string) {
+		if failedEndpoints == nil {
+			failedEndpoints = map[string]string{}
+		}
+		failedEndpoints[endpointKey(rt)] = why
+	}
 	// Addendum #3: ONE request-wide budget across same-hop retries AND
 	// failover hops, and a selection deadline that governs only the choosing
 	// (never the winning attempt's stream).
@@ -1923,6 +1156,13 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			break
 		}
 		rt := routes[i]
+		if why, failed := failedEndpoints[endpointKey(rt)]; failed {
+			attempts = append(attempts, Attempt{
+				Namespace: rt.Account.Namespace, Model: rt.Model,
+				Note: "not tried on another key: " + why,
+			})
+			continue
+		}
 		// Context-size filter (addendum #6): a request whose estimated token
 		// count exceeds the hop's declared context window is filtered BEFORE
 		// dispatch — no paid upstream call, no wasted round-trip. The estimate
@@ -1939,6 +1179,7 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 					Namespace: rt.Account.Namespace, Model: rt.Model,
 					Note: fmt.Sprintf("context too small: estimated %d > max %d", reqEst, rt.Account.MaxContextTokens),
 				})
+				contextSkips++
 				continue
 			}
 		}
@@ -2135,6 +1376,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 				Namespace: rt.Account.Namespace, Model: rt.Model,
 				Note: note,
 			})
+			if !oc.clientCancelled && !errors.Is(err, errAttemptBudgetSpent) {
+				markEndpoint(rt, note)
+			}
 			discardFallback()
 			fallbackTransportErr = err
 			continue
@@ -2160,6 +1404,9 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 			})
 		}
 		if failoverStatus(res.Status) || oc.failed {
+			if !keyScopedStatus(res.Status) {
+				markEndpoint(rt, fmt.Sprintf("upstream %d on this model", res.Status))
+			}
 			discardFallback()
 			rtCopy, resCopy, startCopy := rt, res, start
 			fallbackRoute, fallbackResp, fallbackResult, fallbackStart = &rtCopy, resp, resCopy, startCopy
@@ -2209,459 +1456,12 @@ func (d *Dispatcher) ForwardCandidatesDoc(ctx context.Context, w http.ResponseWr
 	if refusal != nil {
 		return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, refusal
 	}
-	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, errors.New("proxy: all combo endpoints are in five-minute cooldown")
-}
-
-// streamCopyTracked copies SSE upstream->client with a Flush per chunk, observing
-// usage events without altering a single byte. Returns (ttft, usage, err) where
-// err is non-nil when the stream was truncated — the caller records it, since
-// the 200 status has already been sent and cannot be changed.
-//
-// `start` is the DISPATCH time (when the upstream request was posted), not the
-// moment streaming began. TTFT means "time to first token": the provider's
-// prefill happens before it emits any byte, so measuring from inside this
-// function — after headers already arrived — reports a meaningless 1-3ms and
-// hides exactly the cache/prefill latency the number exists to reveal.
-//
-// The third return is the first non-terminal SSE data payload. A streamed
-// error response carries its reason in there, and the ledger's err column is
-// blank for streams unless the caller is handed it.
-//
-// requireTerminal treats a stream that ends without its terminal event as
-// truncated (native streams whose wire defines one).
-func (d *Dispatcher) streamCopyTracked(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *store.Usage, []byte, error) {
-	ttft, tap, first, err := d.streamCopyTap(ctx, w, resp, surface, conv, start, requireTerminal)
-	return ttft, tap.Usage(), first, err
-}
-
-// streamCopyTap is streamCopyTracked returning the tapper itself, for callers
-// that read more than usage from it (the Responses id).
-func (d *Dispatcher) streamCopyTap(ctx context.Context, w http.ResponseWriter, resp *http.Response, surface provider.Surface, conv provider.UsageConvention, start time.Time, requireTerminal bool) (time.Duration, *UsageTapper, []byte, error) {
-	var ttft time.Duration
-	var firstEvent bool
-	var firstPayload []byte
-
-	flusher, _ := w.(http.Flusher)
-	flush := func() {
-		if flusher != nil {
-			flusher.Flush()
-		}
+	final := errors.New("proxy: all combo endpoints are in five-minute cooldown")
+	switch {
+	case contextSkips == len(routes):
+		final = errors.New("proxy: the request is larger than every endpoint's context window (max_context_tokens)")
+	case contextSkips > 0:
+		final = errors.New("proxy: no endpoint can take the request: each is cooling down or has a context window smaller than it")
 	}
-	// Headers already copied; write status now so the client starts receiving.
-	w.WriteHeader(resp.StatusCode)
-	flush()
-
-	// Lines are read with ReadSlice and written back VERBATIM, line ending
-	// included (CRLF stays CRLF), so forwarding is byte-exact. A line longer
-	// than the buffer arrives in pieces: every piece is forwarded at once,
-	// and only lines that fit (maxScanToken) are tapped — the usage chunk
-	// after a giant content line is still read.
-	br := bufio.NewReaderSize(resp.Body, 64*1024)
-	// Read-only usage tap. Merges across events: Anthropic's message_start
-	// carries the input/cache breakdown while message_delta carries the final
-	// output totals, so taking only the first hit would record out=0.
-	tapper := NewUsageTapperFor(surface, conv)
-	var long []byte   // a line spanning several buffer fills, while it fits
-	overlong := false // the current line outgrew maxScanToken: not tapped
-	for {
-		piece, rerr := br.ReadSlice('\n')
-		if len(piece) > 0 {
-			if _, err := w.Write(piece); err != nil {
-				return ttft, tapper, firstPayload, fmt.Errorf("client write: %w", err)
-			}
-			complete := rerr == nil || rerr == io.EOF
-			line := piece
-			if !complete || long != nil || overlong {
-				if !overlong {
-					if len(long)+len(piece) > maxScanToken {
-						long, overlong = nil, true
-					} else {
-						long = append(long, piece...)
-					}
-				}
-				line = long
-			}
-			if complete {
-				if !overlong {
-					line = bytes.TrimRight(line, "\r\n")
-					// TTFT is the first EVENT: blank separators and SSE
-					// comments (": keepalive", sent by some gateways the
-					// moment the request lands) are not the first token.
-					if !firstEvent && len(line) > 0 && line[0] != ':' {
-						ttft = time.Since(start)
-						firstEvent = true
-					}
-					// Remember the first real payload so the caller can
-					// quote it in the ledger. Comments and [DONE] are
-					// skipped: neither can carry an error envelope.
-					if firstPayload == nil {
-						if p := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:"))); len(p) > 0 && p[0] != ':' && !bytes.Equal(p, []byte("[DONE]")) {
-							firstPayload = append([]byte(nil), p...)
-						}
-					}
-					tapper.Observe(line)
-				} else if !firstEvent {
-					tapper.event, tapper.skipEvent = nil, true
-					ttft = time.Since(start)
-					firstEvent = true
-				}
-				if overlong {
-					tapper.event, tapper.skipEvent = nil, true
-				}
-				long, overlong = nil, false
-			}
-			// Flush only when nothing more is already buffered: the client
-			// sees every byte as soon as the upstream stops sending, and a
-			// burst of events costs one flush instead of one per line.
-			if br.Buffered() == 0 {
-				flush()
-			}
-		}
-		if rerr == nil || rerr == bufio.ErrBufferFull {
-			continue
-		}
-		flush()
-		if !firstEvent {
-			ttft = time.Since(start)
-		}
-		if rerr == io.EOF {
-			if requireTerminal && !tapper.terminal {
-				return ttft, tapper, firstPayload, errors.New("upstream stream ended without a terminal event")
-			}
-			return ttft, tapper, firstPayload, nil
-		}
-		// The upstream died mid-stream. The 200 is already committed, so the
-		// only honest signal left is a terminal SSE error frame in the
-		// client's dialect — otherwise the client is left with a silent EOF.
-		writeStreamErrorFrame(w, surface, "upstream connection lost")
-		flush()
-		return ttft, tapper, firstPayload, fmt.Errorf("upstream read: %w", rerr)
-	}
-}
-
-// writeStreamErrorFrame emits a terminal SSE error event in the client's
-// surface dialect. Called only after a committed 200 when the upstream dies
-// mid-stream, so the client gets an explicit error instead of a silent EOF.
-func writeStreamErrorFrame(w io.Writer, surface provider.Surface, msg string) {
-	m, _ := json.Marshal(msg)
-	switch surface {
-	case provider.SurfaceAnthropic:
-		fmt.Fprintf(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":%s}}\n\n", m)
-	case provider.SurfaceResponses:
-		fmt.Fprintf(w, "event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":%s}\n\n", m)
-	default: // openai
-		fmt.Fprintf(w, "data: {\"error\":{\"type\":\"server_error\",\"message\":%s}}\n\n", m)
-	}
-}
-
-// sseUsageRaw returns the raw usage object one SSE data line carries, or nil.
-// Where usage rides is per surface: openai puts it on the final chunk;
-// anthropic sends it on message_start AND message_delta (the delta carries the
-// authoritative output_tokens, the start the input/cache breakdown, so the tap
-// merges across events); responses puts the full usage on response.completed.
-// Every usage-bearing event names "usage", so a line without the word is
-// skipped before any JSON decoding — content deltas are most of a stream.
-func sseUsageRaw(line []byte, surface provider.Surface) map[string]any {
-	payload := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
-	if len(payload) == 0 || !bytes.Contains(payload, []byte(`"usage"`)) {
-		return nil
-	}
-	var ev map[string]any
-	if err := json.Unmarshal(payload, &ev); err != nil {
-		return nil
-	}
-	switch surface {
-	case provider.SurfaceAnthropic:
-		typ, _ := ev["type"].(string)
-		switch typ {
-		case "message_start":
-			if msg, ok := ev["message"].(map[string]any); ok {
-				if u, ok := msg["usage"].(map[string]any); ok {
-					return u
-				}
-			}
-		case "message_delta":
-			if u, ok := ev["usage"].(map[string]any); ok {
-				return u
-			}
-		}
-	case provider.SurfaceResponses:
-		typ, _ := ev["type"].(string)
-		// Usage rides on the TERMINAL event — which is response.completed on
-		// success but response.incomplete when max_output_tokens truncated the
-		// response (observed live). Also accept response.failed rather than
-		// silently recording zero usage for a truncated stream.
-		switch typ {
-		case "response.completed", "response.incomplete", "response.failed":
-			if r, ok := ev["response"].(map[string]any); ok {
-				if u, ok := r["usage"].(map[string]any); ok {
-					return u
-				}
-			}
-		}
-		if u, ok := ev["usage"].(map[string]any); ok {
-			return u
-		}
-	default: // openai
-		if u, ok := ev["usage"].(map[string]any); ok {
-			return u
-		}
-	}
-	return nil
-}
-
-// responsesBodyID reads a complete Responses body's id ("" when absent).
-func responsesBodyID(raw []byte) string {
-	var body struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal(raw, &body) != nil {
-		return ""
-	}
-	return body.ID
-}
-
-// tapJSONUsage extracts usage from a complete (non-streamed) JSON body.
-func tapJSONUsage(body []byte, surface provider.Surface, conv provider.UsageConvention) *store.Usage {
-	var ev map[string]any
-	if err := json.Unmarshal(body, &ev); err != nil {
-		return nil
-	}
-	if u, ok := ev["usage"].(map[string]any); ok {
-		n := store.NormalizeUsageWith(usageSurface(surface), u, conv)
-		return &n
-	}
-	return nil
-}
-
-// tapConvention is how the tap reads a Messages-shape usage object for this
-// hop: the account's declared convention for its own native bytes; exclusive
-// for a translated body, whose usage the codec already normalized.
-func tapConvention(rt Route, cross bool) provider.UsageConvention {
-	if cross {
-		return provider.UsageConventionAuto
-	}
-	return rt.Account.UsageConvention
-}
-
-// --- header plumbing ---
-
-var hopByHop = map[string]bool{
-	"Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
-	"Proxy-Authorization": true, "Te": true, "Trailer": true,
-	"Transfer-Encoding": true, "Upgrade": true,
-	// identity/length are recomputed by net/http for the client side
-	"Content-Length": true,
-}
-
-// stripAlways are request headers that must never reach upstream: they describe
-// the client's connection to US, not its intent toward the provider.
-var stripAlways = map[string]bool{
-	"Authorization":   true, // adapter re-applies the provider's own credential
-	"X-Api-Key":       true,
-	"Cookie":          true,
-	"Host":            true,
-	"Content-Length":  true,
-	"Accept-Encoding": true, // let the upstream decide; we must see plain bytes
-	// Browsers attach Origin to every same-origin POST; forwarding it made
-	// Anthropic-shaped upstreams read the proxied call as a CORS/direct-browser
-	// request and answer 401 ("dangerous-direct-browser-access" gate). The
-	// header describes the browser->dashboard hop and must die here.
-	"Origin": true,
-	// X-Ezllm-Session is the operator's ledger grouping key (M9). It describes
-	// the client->gateway hop, not the gateway->provider hop, so it must not
-	// reach the upstream.
-	"X-Ezllm-Session": true,
-	// x-ezllm-compression is the same class: it tells THIS gateway which
-	// compression profile to run, so it is an operator-side ledger header with
-	// no meaning upstream. It was a known leak carried for scope reasons once;
-	// a provider that started reading it would see a client implementation
-	// detail, so it dies here too.
-	"X-Ezllm-Compression": true,
-	// The in-process web bridges' admission secret. A client cannot know it,
-	// but a value it sends is still never repeated to any upstream.
-	"X-Ezllm-Bridge-Secret":     true,
-	provider.BridgeCallerHeader: true,
-}
-
-// copyClientHeaders copies src's headers onto dst minus stripAlways and the
-// adapter's extraStrip, both matched case-insensitively. It runs per attempt,
-// so it builds nothing: CanonicalHeaderKey returns an already-canonical key
-// without allocating, and extraStrip is a handful of names compared in place.
-func copyClientHeaders(dst, src *http.Request, extraStrip []string) {
-	for k, vs := range src.Header {
-		if stripAlways[http.CanonicalHeaderKey(k)] || containsFold(extraStrip, k) {
-			continue
-		}
-		for _, v := range vs {
-			dst.Header.Add(k, v)
-		}
-	}
-}
-
-func containsFold(names []string, k string) bool {
-	for _, n := range names {
-		if strings.EqualFold(n, k) {
-			return true
-		}
-	}
-	return false
-}
-
-func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
-	for k, vs := range resp.Header {
-		canonical := http.CanonicalHeaderKey(k)
-		if hopByHop[canonical] || canonical == "Set-Cookie" || canonical == "Set-Cookie2" || canonical == "Clear-Site-Data" ||
-			canonical == bridgeutil.SlotWaitHeader {
-			continue
-		}
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-}
-
-// --- small utils ---
-
-// sseHasErrorEnvelope reports whether an SSE payload is an error object.
-// A streamed failure is NOT always signalled by the HTTP status: some
-// providers answer 200 with the error inside the stream's first data payload.
-// Detecting it is what lets the ledger record WHY a "successful" stream was
-// actually a failure.
-// streamErrCause decides what the ledger's err column says about a finished
-// stream, and it is a precedence rule, not a last-writer-wins assignment.
-//
-// A cause recorded earlier in the request is the precise one — "stream
-// truncated: unexpected EOF" names what actually happened to the bytes — and an
-// error envelope in the body must never replace it with a generic snippet. What
-// the envelope DOES add is the upstream's own classification of why, so when one
-// is present its cause word is appended once: "… [rate_limited]". That keeps
-// both halves of the diagnosis in a single TEXT column.
-//
-// With no cause yet, the snippet is the whole story: a failover-committed SSE
-// error response (a 429 whose reason rides in the first data payload) and a 200
-// stream carrying an error object both land here with nothing else to say.
-func streamErrCause(existing string, status int, first []byte) string {
-	if existing == "" {
-		if sseHasErrorEnvelope(first) || status >= 400 {
-			return upstreamErrorSnippet(status, first)
-		}
-		return ""
-	}
-	if sseHasErrorEnvelope(first) {
-		// The full snippet, not just its cause word: the provider's own sentence
-		// ("this model is not included in your free usage") is the most precise
-		// thing either half carries, and a later reader needs it verbatim.
-		if snippet := upstreamErrorSnippet(status, first); !strings.Contains(existing, snippet) {
-			return existing + " · " + snippet
-		}
-	}
-	return existing
-}
-
-func sseHasErrorEnvelope(payload []byte) bool {
-	if len(payload) == 0 {
-		return false
-	}
-	var ev map[string]any
-	if err := json.Unmarshal(payload, &ev); err != nil {
-		return false
-	}
-	e, ok := ev["error"]
-	return ok && e != nil
-}
-
-// maxErrPeek bounds how much of a FAILED response body is read for diagnostics.
-// Error envelopes are tiny; 2 KiB costs nothing and still holds an HTML error
-// page's first line.
-const maxErrPeek = 2048
-
-// peekUpstreamError reads a bounded prefix of a failed response's body and puts
-// it back, so failover can report the provider's own words without stealing the
-// body from a later commit. Only non-2xx responses are touched, and the restored
-// reader repays every byte read, so the response stays committable byte-for-byte
-// as the final fallback.
-func peekUpstreamError(resp *http.Response) string {
-	if resp == nil || resp.Body == nil || resp.StatusCode < 400 {
-		return ""
-	}
-	// Same rendering as the ledger's err column, so a log line and a row read
-	// identically.
-	return upstreamErrorSnippet(resp.StatusCode, peekBody(resp, maxErrPeek))
-}
-
-// upstreamErrorSnippet renders a bounded, single-line summary of an upstream
-// error body for the ledger.
-//
-// Bounded because the ledger is not a request log, and single-line because the
-// dashboard renders err inline — a raw multi-line provider body would wreck the
-// table. The status is prefixed so a row is self-describing even if the body is
-// empty or non-JSON (HTML error pages happen).
-//
-// The semantic cause from provider.ErrorCause leads in brackets —
-// `err LIKE '%[rate_limited]%'` is a diagnosis — and the upstream's own
-// words follow verbatim.
-func upstreamErrorSnippet(status int, raw []byte) string {
-	cause := provider.ErrorCause(status, raw)
-	s := strings.Join(strings.Fields(string(raw)), " ")
-	if s == "" {
-		return fmt.Sprintf("upstream %d [%s]: (empty body)", status, cause)
-	}
-	if len(s) > maxErrSnippet {
-		// Cut on a rune boundary so a multi-byte character is never split into
-		// invalid UTF-8 — the column is TEXT and the dashboard will render it.
-		cut := maxErrSnippet
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "…"
-	}
-	return fmt.Sprintf("upstream %d [%s]: %s", status, cause, s)
-}
-
-func msPtr(d time.Duration) *int64 {
-	v := d.Milliseconds()
-	return &v
-}
-
-// msAtLeastOne renders a duration in whole milliseconds with a floor of 1.
-//
-// TTFT against a fast upstream is routinely sub-millisecond, and Milliseconds()
-// truncates that to 0 — which the dashboard cannot distinguish from "never
-// measured". Clamping to 1 keeps the value honest: it means "under 1ms", and
-// the ttft<total streaming invariant stays meaningful.
-func msAtLeastOne(d time.Duration) *int64 {
-	v := d.Milliseconds()
-	if v < 1 {
-		v = 1
-	}
-	return &v
-}
-
-// usageSurface picks the usage-parsing shape for a surface: Anthropic and
-// Responses have their own; every other surface (chat and the OpenAI-shaped
-// service endpoints) reads as OpenAI. It is NOT the ledger surface — the
-// server's store2surface maps every service surface to its own value.
-func usageSurface(s provider.Surface) store.Surface {
-	switch s {
-	case provider.SurfaceAnthropic:
-		return store.SurfaceAnthropic
-	case provider.SurfaceResponses:
-		return store.SurfaceResponses
-	default:
-		return store.SurfaceChat
-	}
-}
-
-func (d *Dispatcher) requestPolicy(ctx context.Context) settings.Values {
-	if p, ok := settings.From(ctx); ok {
-		return p
-	}
-	p := settings.Defaults()
-	p.Retries = d.retryAttempts
-	p.AttemptBudget = d.attemptBudget
-	if d.dispatchDeadline > 0 {
-		p.DispatchDeadline = d.dispatchDeadline.String()
-	}
-	return p
+	return Route{}, Result{Attempts: attempts, UpstreamAttempts: led.used, AttemptBudget: policy.AttemptBudget, LearnedReasoning: result.LearnedReasoning}, final
 }

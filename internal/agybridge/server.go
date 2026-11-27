@@ -15,14 +15,19 @@ const maxBodyBytes = 32 << 20
 
 // Server exposes OpenAI Chat Completions over the CLI. Only ezllm dials it.
 type Server struct {
-	ExperimentalTools bool
-	Runner            Executor
-	Token             string
-	Version           string
-	Models            []Model // the login's catalog from boot (`agy models`)
-	Info              map[string]any
-	Logf              func(format string, args ...any)
-	Now               func() time.Time
+	// CallerTools enables the structured-output caller-tool adapter. Boot sets
+	// it whenever the CLI offers --json-schema; false keeps text chat only.
+	CallerTools bool
+	// PlanUsage enables GET /v1/usage: the CLI answers /usage itself
+	// (SupportsPlanUsage).
+	PlanUsage bool
+	Runner    Executor
+	Token     string
+	Version   string
+	Models    []Model // the login's catalog from boot (`agy models`)
+	Info      map[string]any
+	Logf      func(format string, args ...any)
+	Now       func() time.Time
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -39,7 +44,7 @@ func (s *Server) now() time.Time {
 }
 
 // Handler builds the mux: /healthz (two fields, house contract), /status
-// (operator detail), /v1/models, /v1/chat/completions.
+// (operator detail), /v1/models, /v1/usage (plan limits), /v1/chat/completions.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -65,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.authed(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Models})
 	}))
+	mux.HandleFunc("GET /v1/usage", s.authed(s.usage))
 	mux.HandleFunc("POST /v1/chat/completions", s.authed(s.chat))
 	return mux
 }
@@ -100,7 +106,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		bridgeutil.WriteJSONBytes(w, http.StatusRequestEntityTooLarge, bridgeutil.OpenAIErrorEnvelope("invalid_request_error", "agy-bridge: request body too large", "invalid_request"))
 		return
 	}
-	req, err := parseRequest(body, s.ExperimentalTools)
+	req, err := parseRequest(body, s.CallerTools)
 	if err != nil {
 		code := "invalid_request"
 		var u Unsupported

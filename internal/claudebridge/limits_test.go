@@ -87,3 +87,20 @@ func TestARunWithoutRateLimitKeepsThePreviousReading(t *testing.T) {
 		t.Fatal("an empty or window-less rate_limit_info wiped the last reading")
 	}
 }
+
+func TestUnrecognizedQuotaWindowsKeepPreviousReading(t *testing.T) {
+	l := &Limits{}
+	now := time.Unix(1792720000, 0)
+	l.Observe(measuredRateLimit(), now)
+	before, ok := l.UsageBody()
+	if !ok {
+		t.Fatal("missing initial reading")
+	}
+	l.Observe(map[string]any{"unifiedWindows": map[string]any{
+		"five_hour": map[string]any{"utilization": "unknown"},
+	}}, now.Add(time.Minute))
+	after, ok := l.UsageBody()
+	if !ok || string(after) != string(before) {
+		t.Fatalf("invalid sample replaced last reading: %s", after)
+	}
+}

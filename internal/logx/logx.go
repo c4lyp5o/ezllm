@@ -159,10 +159,11 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	}
 	buf = h.paint(buf, levelColor(r.Level), fmt.Sprintf("%-5s", r.Level.String()))
 	buf = append(buf, ' ')
+	msg := safeMessage(r.Message)
 	if r.Level >= slog.LevelError {
-		buf = h.paint(buf, bold, r.Message)
+		buf = h.paint(buf, bold, msg)
 	} else {
-		buf = append(buf, r.Message...)
+		buf = append(buf, msg...)
 	}
 	buf = append(buf, h.attrs...)
 	r.Attrs(func(a slog.Attr) bool {
@@ -174,6 +175,39 @@ func (h *handler) Handle(_ context.Context, r slog.Record) error {
 	defer h.mu.Unlock()
 	_, err := h.w.Write(buf)
 	return err
+}
+
+// safeMessage escapes control characters in a log message. Messages can carry
+// interpolated upstream or CLI text; a raw newline would forge a second log
+// line and an escape byte would repaint the terminal. The common message has
+// none and is returned as is, without allocating.
+func safeMessage(s string) string {
+	clean := true
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7f {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\n':
+			b.WriteString(`\n`)
+		case c == '\r':
+			b.WriteString(`\r`)
+		case c == '\t':
+			b.WriteByte('\t')
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {

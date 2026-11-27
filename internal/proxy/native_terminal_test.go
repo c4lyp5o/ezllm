@@ -61,3 +61,27 @@ func TestNativeCleanEOFCutMarksDispatchTruncated(t *testing.T) {
 		t.Fatalf("stream outcome = %q, want truncated", res.StreamOutcome)
 	}
 }
+
+func TestNativeStreamDiagnosticSkipsSSEMetadata(t *testing.T) {
+	const payload = `{"type":"error","error":{"message":"upstream unavailable"}}`
+	const stream = ": keepalive\n\nevent: error\nid: 1\ndata: " + payload + "\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Body: httpBody(stream)}
+	rec := httptest.NewRecorder()
+	_, _, first, err := newDispatcher().streamCopyTracked(context.Background(), rec, resp, provider.SurfaceAnthropic, provider.UsageConventionAuto, time.Now(), false)
+	if err != nil || string(first) != payload || rec.Body.String() != stream {
+		t.Fatalf("first payload = %q, forwarded = %q, error = %v", first, rec.Body.String(), err)
+	}
+}
+
+// A gateway that labels a plain error body text/event-stream still gets its own
+// words into the ledger, not "(empty body)".
+func TestNativeStreamDiagnosticKeepsPlainErrorBody(t *testing.T) {
+	for _, body := range []string{`{"error":{"message":"quota gone"}}`, "Too many requests: quota gone"} {
+		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Body: httpBody(body)}
+		rec := httptest.NewRecorder()
+		_, _, first, err := newDispatcher().streamCopyTracked(context.Background(), rec, resp, provider.SurfaceChat, provider.UsageConventionAuto, time.Now(), false)
+		if err != nil || string(first) != body || rec.Body.String() != body {
+			t.Fatalf("first payload = %q, forwarded = %q, error = %v", first, rec.Body.String(), err)
+		}
+	}
+}

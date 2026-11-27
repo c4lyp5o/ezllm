@@ -12,7 +12,7 @@ package registration
 //   - GET {base}/models is 405 ("GET not supported for requested URI") —
 //     Cloudflare's OpenAI-compat prefix has no model list. The catalog comes
 //     from the native envelope {"success":true,"result":[...]} which the
-//     OpenAI parser reads as ZERO models — exactly the failure Calypso hit:
+//     OpenAI parser reads as ZERO models — exactly the failure seen live:
 //     "no credential-checking endpoint and no model to probe with".
 
 import (
@@ -105,7 +105,7 @@ func TestCloudflareKeyTestEndToEnd(t *testing.T) {
 	}
 
 	// Catalog: the native envelope parsed — NOT the 405 /models path, NOT an
-	// empty list (the old behaviour that produced Calypso's failure).
+	// empty list (the old behaviour that produced that failure).
 	if len(res.Catalog) != 2 {
 		t.Fatalf("catalog = %+v, want the 2 unique @cf models from the envelope", res.Catalog)
 	}

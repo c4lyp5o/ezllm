@@ -250,7 +250,7 @@ func (t *Tester) Run(ctx context.Context, acct provider.Account, opts Options) *
 		res.addStep(Step{Step: StepCatalog, OK: true,
 			Detail: fmt.Sprintf("%d models", len(models))})
 	case isAuthErr(catErr) && !adapter.CatalogIsPublic():
-		// The catalog authenticates on this provider (ssn-gpt) and rejected
+		// The catalog authenticates on this provider (initech-gpt) and rejected
 		// us. Record it, but keep going: the oracle is the designated gate,
 		// and a scope mismatch must not reject a key that can actually infer.
 		// We keep the error so the NO-MODEL branch can quote it if nothing
@@ -411,8 +411,8 @@ func (t *Tester) authGate(
 	)
 	// Attempt up to 3× on 429/5xx/timeout. 401/403 stop immediately — on
 	// these providers 403 means bad credentials, not "slow down", so backing
-	// off would only delay the user's error message. An HTTP status is not a
-	// Go error (doProbe errs only on transport), so the STATUS decides.
+	// off would only delay the user's error message. An HTTP status alone is not a
+	// Go error, so the status decides whether to retry.
 	for attempt := 0; attempt < 3; attempt++ {
 		var ores httpResult
 		ores, authErr = probe(ctx, t, pace, defaultStepTimeout,
@@ -1055,6 +1055,10 @@ type bodyOverride struct{ body string }
 
 func withBody(b string) *bodyOverride { return &bodyOverride{body: b} }
 
+// maxProbeBody matches the catalog reader's cap (provider getJSONStatus): some auth
+// oracles ARE the catalog, and a large one must not fail a good key.
+const maxProbeBody = 8 << 20
+
 // doProbe performs one HTTP probe with the adapter's auth semantics: Bearer vs
 // x-api-key, per-request session ids, custom headers — all in one place.
 // The adapter is a parameter, not a package global: Tester is shared across
@@ -1096,13 +1100,12 @@ func doProbe(
 	if payload != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// PrepareRequest applies the account's custom headers exactly as live
+	// traffic gets them. Adding them again here let a custom header replace
+	// the headers a bridge adapter sets, and probed with headers live
+	// requests never carry.
 	if err := adapter.PrepareRequest(ctx, req, acct, key, surfaceFor(spec.Path)); err != nil {
 		return 0, nil, err
-	}
-	for k, v := range acct.CustomHeaders {
-		if k != "" && v != "" {
-			req.Header.Set(k, v)
-		}
 	}
 
 	resp, err := client.Do(req)
@@ -1110,9 +1113,12 @@ func doProbe(
 		return 0, nil, &probeError{status: 0, raw: err.Error()}
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody+1))
 	if err != nil {
 		return resp.StatusCode, nil, err
+	}
+	if len(b) > maxProbeBody {
+		return resp.StatusCode, nil, fmt.Errorf("probe response exceeds %d bytes", maxProbeBody)
 	}
 	return resp.StatusCode, b, nil
 }
@@ -1289,7 +1295,7 @@ func backoff(attempt int) time.Duration {
 //
 //	opencode/anthropic  {"type":"error","error":{"type":…,"message":…}}
 //	openai-style        {"error":{"message":…,"type":…}}
-//	ssn-gpt             {"code":…,"message":…}
+//	initech-gpt             {"code":…,"message":…}
 func upstreamErr(raw []byte) map[string]any {
 	if len(raw) == 0 {
 		return nil

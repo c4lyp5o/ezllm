@@ -181,7 +181,7 @@ type Resolver struct {
 	// on the Responses wire for chat AND anthropic clients. Each entry is a
 	// REGEX matched against the full "<ns>/<model>" string (both ends
 	// anchored), so a plain id still matches only itself and a family pattern
-	// like `stationine/gpt-6\\.1-sol` covers the variants. Empty = inert.
+	// like `globex/gpt-6\\.1-sol` covers the variants. Empty = inert.
 	responsesModels []*regexp.Regexp
 	// universalEnabled turns on the three NEW cross-wire cells
 	// (chat→messages, responses→chat, responses→messages) and the fixed
@@ -245,7 +245,7 @@ func pinSurface(pin string) (provider.Surface, bool) {
 
 // WithResponsesModels installs the curated patterns whose matching hops ride
 // the Responses wire for chat and anthropic clients (see
-// docs/responses-wire-design.md). Entries are regexes matched fully against
+// docs/design/responses-wire-design.md). Entries are regexes matched fully against
 // "<ns>/<model>"; an entry that does not compile is dropped — config.Load
 // validates the same list at boot and refuses to start on it, so this skip is
 // defensive only (tests may hand the resolver raw strings).
@@ -677,7 +677,7 @@ func (r *Resolver) resolveCandidates(ctx context.Context, requested string, surf
 	if dec.wire != surface {
 		rt.WireSurface = dec.wire
 	}
-	return []proxy.Route{rt}, nil
+	return r.expandKeys(ctx, []proxy.Route{rt}), nil
 }
 
 // resolveCombo turns a bare combo name into ordered candidates.
@@ -729,6 +729,10 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		routes []proxy.Route
 
 		first error // first hop's rejection, kept as the failure to report
+		// unavailable is a rules veto (allowed hours, a cap): temporary, so
+		// it wins over static skips when no hop is left, and the client gets
+		// 429 with when to retry, not 502.
+		unavailable *ErrUnavailable
 	)
 	// Hops commonly share an account (one account, several models). Its row
 	// and its key are the same for every such hop within one resolution, so
@@ -743,8 +747,20 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 	accts := make(map[int64]acctAnswer, len(combo.Hops))
 	keys := make(map[int64]keyAnswer, len(combo.Hops))
+	ex := explainerFrom(ctx)
 	for _, h := range combo.Hops {
+		ns := fmt.Sprint(h.AccountID)
+		skip := func(status, reason string) {
+			ex.note(ExplainHop{AccountID: h.AccountID, Namespace: ns, Model: h.ModelID, Status: status, Reason: reason})
+		}
 		if h.Enabled != nil && !*h.Enabled {
+			if ex != nil {
+				// Only a traced run names the account of a hop it never tries.
+				if a, err := r.catalog.AccountByID(ctx, h.AccountID); err == nil {
+					ns = a.Namespace
+				}
+			}
+			skip("skipped", "turned off in this combo")
 			continue
 		}
 		aa, seen := accts[h.AccountID]
@@ -757,17 +773,25 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 			if first == nil {
 				first = fmt.Errorf("hop account %d/%s: %w", h.AccountID, h.ModelID, err)
 			}
+			skip("skipped", "account not found")
 			continue
 		}
+		ns = acct.Namespace
 		if !acct.Enabled {
+			skip("skipped", "account "+acct.Name+" is disabled")
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: account %q is disabled", acct.Namespace, h.ModelID, acct.Name)
 			}
 			continue
 		}
 		if ok, err := r.catalog.ModelExists(ctx, acct.ID, h.ModelID); err != nil || !ok {
+			skip("skipped", "not in the account's model list")
 			if first == nil {
-				first = fmt.Errorf("hop %s/%s: not in that account's catalog", acct.Namespace, h.ModelID)
+				if err != nil {
+					first = fmt.Errorf("hop %s/%s: model lookup: %w", acct.Namespace, h.ModelID, err)
+				} else {
+					first = fmt.Errorf("hop %s/%s: not in that account's catalog", acct.Namespace, h.ModelID)
+				}
 			}
 			continue
 		}
@@ -780,11 +804,13 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.refusePin != nil {
 			// A pin is a refusal, not a skip: the operator's constraint fails
 			// the whole combo, exactly as it did before.
+			skip("refused", dec.refusePin.Error())
 			return nil, dec.refusePin
 		}
 		if dec.refuse != nil {
 			// A hop with no wire left is dropped like any other unusable hop;
 			// the reason is kept for the "no usable hops" message.
+			skip("skipped", dec.refuse.Error())
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: %w", acct.Namespace, h.ModelID, dec.refuse)
 			}
@@ -796,8 +822,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		// later"), exactly like resolveDirect's hard stop — a raw refusal
 		// would fall through errorStatus to 502 and read as a gateway fault.
 		if err := r.eligibleHere(ctx, acct.ID, h.ModelID); err != nil {
-			if first == nil {
-				first = &ErrUnavailable{
+			skip("skipped", "rule: "+err.Error())
+			if unavailable == nil {
+				unavailable = &ErrUnavailable{
 					Requested: name,
 					Reason:    fmt.Sprintf("hop %s/%s: %s", acct.Namespace, h.ModelID, err.Error()),
 					cause:     err,
@@ -812,6 +839,7 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		key, err := ka.key, ka.err
 		if err != nil {
+			skip("skipped", "no usable key")
 			if first == nil {
 				first = fmt.Errorf("hop %s/%s: no usable key: %w", acct.Namespace, h.ModelID, err)
 			}
@@ -837,6 +865,11 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		if dec.wire != surface {
 			route.WireSurface = dec.wire
 		}
+		if ex != nil {
+			h := candidateHop(route)
+			h.KeyCount = r.keyCount(ctx, acct.ID)
+			ex.note(h)
+		}
 		// Every candidate is a working member of the strategy: a hop whose
 		// wire we translate is ordered, held good and rotated on exactly the
 		// same terms as a native one (operator decision 2026-10-13 — a
@@ -846,6 +879,9 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 	}
 
 	if len(routes) == 0 {
+		if unavailable != nil {
+			return nil, unavailable
+		}
 		if first != nil {
 			// A rules veto arrives pre-typed and pre-worded ("X is not
 			// available right now: hop …"); re-wrapping it would print the
@@ -858,7 +894,15 @@ func (r *Resolver) resolveCombo(ctx context.Context, name string, surface provid
 		}
 		return nil, fmt.Errorf("router: combo %q has no usable hops", name)
 	}
+	if explaining(ctx) {
+		// A dry run reports hops in the combo's order and moves no strategy
+		// state (round-robin and block cursors advance in orderRoutes).
+		return routes, nil
+	}
 	candidates, blockPos := orderRoutes(combo, routes)
+	// Keys expand AFTER the strategy: round-robin and block cursors stay keyed
+	// by account and model, and each hop's keys stay next to each other.
+	candidates = r.expandKeys(ctx, candidates)
 	// BlockPos rides on EVERY candidate: it tags the DISPATCH (this request's
 	// position inside its block), not a hop. Whichever route actually serves,
 	// the ledger row carries the same tag — the "N requests finished" evidence.

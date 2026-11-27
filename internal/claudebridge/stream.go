@@ -104,6 +104,7 @@ type StreamWriter struct {
 	msgID         string
 	model         string
 	stop          string
+	stopSeq       string // the stop sequence that ended the turn, if any
 	usage         Usage
 	text          strings.Builder
 	blocks        []map[string]any
@@ -142,6 +143,9 @@ func (s *StreamWriter) Handle(f Frame) error {
 			if d, ok := ev["delta"].(map[string]any); ok {
 				if sr, ok := d["stop_reason"].(string); ok {
 					s.stop = sr
+				}
+				if seq, ok := d["stop_sequence"].(string); ok {
+					s.stopSeq = seq
 				}
 			}
 			if raw, err := json.Marshal(ev["usage"]); err == nil {
@@ -217,7 +221,7 @@ func (s *StreamWriter) Finish() error {
 	}
 	payload := map[string]any{
 		"type":  "message_delta",
-		"delta": map[string]any{"stop_reason": s.stopReasonOr("end_turn"), "stop_sequence": nil},
+		"delta": map[string]any{"stop_reason": s.stopReasonOr("end_turn"), "stop_sequence": s.stopSequence()},
 		"usage": s.usageMap(),
 	}
 	if s.terminal != nil {
@@ -231,6 +235,14 @@ func (s *StreamWriter) Finish() error {
 	rawStop, _ := json.Marshal(map[string]any{"type": "message_stop"})
 	s.finished = true
 	return s.writeEvent("message_stop", rawStop)
+}
+
+// stopSequence is the matched stop sequence, or nil when none ended the turn.
+func (s *StreamWriter) stopSequence() any {
+	if s.stopSeq == "" {
+		return nil
+	}
+	return s.stopSeq
 }
 
 func (s *StreamWriter) stopReasonOr(fallback string) string {
@@ -275,7 +287,7 @@ func (s *StreamWriter) Message(model string) map[string]any {
 		"model":         model,
 		"content":       content,
 		"stop_reason":   s.stopReasonOr("end_turn"),
-		"stop_sequence": nil,
+		"stop_sequence": s.stopSequence(),
 		"usage":         s.usageMap(),
 	}
 }

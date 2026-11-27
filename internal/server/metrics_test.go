@@ -126,7 +126,7 @@ func TestMetricsCountCommittedRequests(t *testing.T) {
 			t.Errorf("scrape missing %q", want)
 		}
 	}
-	if strings.Contains(body, "tok-infer") || strings.Contains(body, "hermes") {
+	if strings.Contains(body, "tok-infer") || strings.Contains(body, "my-app") {
 		t.Error("scrape names a client token or client")
 	}
 }

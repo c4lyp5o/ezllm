@@ -52,15 +52,15 @@ func seedCalls(t *testing.T, h *harness) {
 	t.Helper()
 	now := time.Now()
 	seeds := []store.Call{
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200,
 			TokensIn: 10, TokensOut: 5},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200,
 			TokensIn: 200, TokensOut: 40},
 		{TS: now, Client: "claude-code", Surface: store.SurfaceAnthropic, Model: "m", Status: 200,
 			TokensIn: 5000, TokensOut: 300},
 		{TS: now, Client: "claude-code", Surface: store.SurfaceAnthropic, Model: "m", Status: 200,
 			TokensIn: 90000, TokensOut: 9000, ReasoningTokens: 700},
-		{TS: now.Add(-48 * time.Hour), Client: "hermes", Surface: store.SurfaceChat,
+		{TS: now.Add(-48 * time.Hour), Client: "my-app", Surface: store.SurfaceChat,
 			Model: "m", Status: 429, TokensIn: 70000, TokensOut: 1},
 	}
 	for _, c := range seeds {
@@ -243,9 +243,9 @@ func TestRequestsFiltersByClient(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()
 	for _, c := range []store.Call{
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20},
-		{TS: now, Client: "hermes-2", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 20},
+		{TS: now, Client: "my-app-2", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 30},
 	} {
 		h.db.RecordCall(c)
 	}
@@ -256,8 +256,8 @@ func TestRequestsFiltersByClient(t *testing.T) {
 		query string
 		count int64
 	}{
-		{"?client=hermes", 2},
-		{"?client=hermes-2", 1},
+		{"?client=my-app", 2},
+		{"?client=my-app-2", 1},
 		{"?client=herm", 0}, // exact match, not a prefix
 	} {
 		code, got := doRequests(t, h, tc.query)
@@ -272,19 +272,19 @@ func TestRequestsSummaryCompressionCounts(t *testing.T) {
 	now := time.Now()
 	seeds := []store.Call{
 		// applied: real savings, no notional.
-		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Account: "a", Model: "m", Status: 200,
 			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
 			CompressionApplied: true, TokensSaved: 400},
 		// declined: notional carries the would-have-saved, applied is false.
-		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Account: "a", Model: "m", Status: 200,
 			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
 			CompressionApplied: false, TokensSavedNotional: 250},
 		// declined again, plus another rejected notional.
-		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Account: "a", Model: "m", Status: 200,
 			TokensIn: 100, TokensOut: 10, CompressionProfile: "agentic-safe",
 			CompressionApplied: false, TokensSavedNotional: 120},
 		// plain call: compression never ran at all — not a decline.
-		{TS: now, Client: "hermes", Account: "a", Model: "m", Status: 200,
+		{TS: now, Client: "my-app", Account: "a", Model: "m", Status: 200,
 			TokensIn: 50, TokensOut: 5},
 	}
 	for _, c := range seeds {
@@ -317,6 +317,7 @@ func TestRequestsRejectsBadParams(t *testing.T) {
 	seedCalls(t, h)
 	for _, q := range []string{
 		"?min_tin=abc", "?min_tin=-1", "?max_tout=-5",
+		"?min_tin=2&max_tin=1", "?min_tout=2&max_tout=1",
 		"?sort=hax", "?limit=0", "?limit=501",
 		"?from=yesterday", "?to=soon",
 	} {

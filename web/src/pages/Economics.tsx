@@ -28,6 +28,8 @@ import { Stagger, StaggerItem } from '../components/motion';
 import {
   btn, cx, EmptyState, formatTokens, inputCls, nfmt, pct, SectionLabel, Segmented,
 } from '../components/ui';
+import { ExportButtons } from '../components/ExportButtons';
+import type { Column } from '../utils/export';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 
@@ -42,6 +44,15 @@ function Metric({ label, value, note, tone }: { label: string; value: string; no
     </div>
   );
 }
+
+// Spend export: one row per day, provider and model, as GET /admin/cost reports it.
+const COST_COLUMNS: Column<CostRow>[] = [
+  { key: 'day', get: (r) => r.day }, { key: 'account', get: (r) => r.account }, { key: 'model', get: (r) => r.model },
+  { key: 'calls', get: (r) => r.calls }, { key: 'unpriced_calls', get: (r) => r.unpriced_calls },
+  { key: 'tokens_in', get: (r) => r.tokens_in }, { key: 'tokens_out', get: (r) => r.tokens_out },
+  { key: 'cached_read', get: (r) => r.tokens_cached_read }, { key: 'cached_write', get: (r) => r.tokens_cached_write },
+  { key: 'usd', get: (r) => r.usd.toFixed(6) },
+];
 
 export default function Economics() {
   const [range, setRange] = useRange();
@@ -334,6 +345,7 @@ export default function Economics() {
                 ) : costTotals?.pricing_complete && costRows.length > 0 ? (
                   <span className="text-[12px] text-ok">all calls priced</span>
                 ) : null}
+                <ExportButtons what="spend" rows={costRows} cols={COST_COLUMNS} note={`spend by day, provider and model for ${RANGE_LABEL[range]}`} />
               </>
             }>
             {costError ? (

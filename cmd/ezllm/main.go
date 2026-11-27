@@ -1,4 +1,4 @@
-// Command ezllm is Calypso's lightweight LLM router.
+// Command ezllm is a lightweight LLM router.
 //
 // M2: config + SQLite store (WAL, single writer) +
 // three passthrough surfaces (OpenAI chat, Anthropic messages, OpenAI
@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -71,9 +70,21 @@ func run() error {
 			return runBackupCommand(os.Args[1], os.Args[2:])
 		case "bridge-check":
 			return runBridgeCheck(os.Args[2:], os.Stdout)
+		case "rotate-master-key":
+			return runRotateMasterKey(os.Args[2:], os.Stdout)
+		case "token":
+			return runTokenCreate(os.Args[2:], os.Stdout)
 		case "help", "-h", "--help":
 			fmt.Println("usage: ezllm [flags]            start the router")
 			fmt.Println("       ezllm bridge-check NAME  gate a bridge CLI (claude|codex|agy|copilot) before promoting it")
+			fmt.Println("       ezllm backup-verify --archive FILE --secret-file FILE")
+			fmt.Println("                                check an encrypted backup")
+			fmt.Println("       ezllm backup-restore --archive FILE --secret-file FILE --output NEW_DIR")
+			fmt.Println("                                restore an encrypted backup into a new folder")
+			fmt.Println("       ezllm rotate-master-key [--data-dir DIR] [--key-file FILE]")
+			fmt.Println("                                re-encrypt stored secrets under a new master key (ezllm stopped)")
+			fmt.Println("       ezllm token create --name NAME [--roles infer,metrics,admin] [--data-dir DIR]")
+			fmt.Println("                                create a client key and print it once")
 			return nil
 		}
 	}
@@ -315,7 +326,7 @@ func run() error {
 		loc, err := time.LoadLocation(usageTZ)
 		if err != nil {
 			return fmt.Errorf("EZLLM_USAGE_TZ=%q does not resolve to a time zone on this host "+
-				"(use an IANA name like Asia/Kuala_Lumpur, or unset it for UTC): %w", usageTZ, err)
+				"(use an IANA name like Europe/Berlin, or unset it for UTC): %w", usageTZ, err)
 		}
 		_ = loc
 		log.Info("usage day bucketing zone", "tz", usageTZ)
@@ -366,18 +377,18 @@ func run() error {
 	}
 	// Claude subscription surface: loopback-only, off unless EZLLM_CLAUDE_BRIDGE=on.
 	// Enabling it without a usable CLI or login fails the boot loudly.
-	stopClaude, err := startClaudeBridge(ctx, log, report)
+	stopClaude, err := startClaudeBridge(ctx, log, report, cfg.DataDir)
 	if err != nil {
 		return err
 	}
 	// ChatGPT subscription surface: loopback-only, off unless EZLLM_CODEX_BRIDGE=on.
-	stopCodex, err := startCodexBridge(ctx, log, report)
+	stopCodex, err := startCodexBridge(ctx, log, report, cfg.DataDir)
 	if err != nil {
 		stopClaude()
 		return err
 	}
 	// Antigravity subscription surface: loopback-only, off unless EZLLM_AGY_BRIDGE=on.
-	stopAgy, err := startAgyBridge(ctx, log, report)
+	stopAgy, err := startAgyBridge(ctx, log, report, cfg.DataDir)
 	if err != nil {
 		stopCodex()
 		stopClaude()
@@ -386,7 +397,7 @@ func run() error {
 	// GitHub Copilot subscription surface: loopback-only, off unless
 	// EZLLM_COPILOT_BRIDGE=on. This replaces the OAuth/device-flow provider —
 	// the CLI's own login is the credential, ezllm never mints a session.
-	stopCopilot, err := startCopilotBridge(ctx, log, report)
+	stopCopilot, err := startCopilotBridge(ctx, log, report, cfg.DataDir)
 	if err != nil {
 		stopAgy()
 		stopCodex()
@@ -588,11 +599,14 @@ func shadowSamplerFor(pct int) func() bool {
 // deadlines come from the caller's context. Redirects stay on the origin the
 // request was sent to: provider keys and prompts never follow one elsewhere.
 func upstreamClient(cfg *config.Config) *http.Client {
-	tr := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     90 * time.Second,
-	}
+	// Start from Go's default transport: it honours HTTPS_PROXY/NO_PROXY and
+	// bounds connecting (30 s) and the TLS handshake (10 s). An empty
+	// Transport has neither, so a dead upstream held a request slot for the
+	// kernel's connect timeout and every proxy setting was ignored.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConns = 100
+	tr.MaxIdleConnsPerHost = 20
+	tr.IdleConnTimeout = 90 * time.Second
 	return &http.Client{Transport: tr, Timeout: cfg.UpstreamTimeout, CheckRedirect: provider.SameOriginRedirect}
 }
 
@@ -602,13 +616,9 @@ func upstreamClient(cfg *config.Config) *http.Client {
 // still translates. (The deprecated EZLLM_TRANSLATION_UNIVERSAL_ENABLED was
 // removed in 2.0.0; checkRetiredEnv refuses it.)
 func translationFromEnv(t *config.Translation, getenv func(string) string) error {
-	v := strings.TrimSpace(getenv("EZLLM_TRANSLATION_ENABLED"))
-	if v == "" {
-		return nil
-	}
-	on, err := strconv.ParseBool(v)
-	if err != nil {
-		return fmt.Errorf("EZLLM_TRANSLATION_ENABLED=%q is not a boolean (want true/false/1/0): %w", v, err)
+	on, set, err := envSwitch("EZLLM_TRANSLATION_ENABLED", getenv("EZLLM_TRANSLATION_ENABLED"))
+	if err != nil || !set {
+		return err
 	}
 	t.Enabled, t.UniversalEnabled = on, on
 	return nil

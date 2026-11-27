@@ -10,10 +10,11 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-// ── compression at request time (docs/compression-design.md) ────────────────
+// ── compression at request time (docs/design/compression-design.md) ────────────────
 //
-// Resolution chain (M5 slice): x-ezllm-compression header → the combo's
-// compression_profile_id → off. Every lookup fails open: unknown name,
+// Resolution chain: x-ezllm-compression header → the calling key's
+// compression_profile_id → the combo's compression_profile_id → off. The key's
+// profile applies on direct namespace/model routes too. Every lookup fails open: unknown name,
 // disabled profile, missing combo — the request just proceeds uncompressed.
 
 // compressionFor resolves the profile for a request. The second return is a
@@ -27,6 +28,21 @@ func (s *Server) compressionFor(r *http.Request, requested string) (*store.Compr
 			return nil, "off"
 		}
 		p, err := s.db.CompressionProfileByName(ctx, h)
+		if err != nil {
+			return nil, "unknown-profile"
+		}
+		if !p.Enabled {
+			return nil, "disabled"
+		}
+		return p, ""
+	}
+	// No profiles at all: nothing a key or combo points at can apply, so the
+	// request skips both lookups and goes out as the app wrote it.
+	if !s.db.HasCompressionProfiles(ctx) {
+		return nil, ""
+	}
+	if id := s.db.TokenCompressionProfileID(ctx, clientName(r)); id > 0 {
+		p, err := s.db.GetCompressionProfile(ctx, id)
 		if err != nil {
 			return nil, "unknown-profile"
 		}

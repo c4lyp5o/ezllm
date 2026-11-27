@@ -1,123 +1,159 @@
-# Settings administration
+# Settings
 
-Settings has six sections: General, Security, Backup & Recovery, Gateway,
-Notifications and System. Provider accounts, combos, client tokens and compression
-profiles remain on their existing pages.
+**Settings** in the dashboard has six tabs. Providers, combos, app keys and compression
+profiles have their own pages.
 
-## Configuration ownership
+| Tab | What you set there |
+|---|---|
+| **General** | Your timezone, and whether ezllm checks for new releases |
+| **Security** | The dashboard password and signed-in browsers |
+| **Backup & Recovery** | Encrypted backups and configuration exports |
+| **Gateway** | Translation, automatic probing, catalog and price refresh, retries and cooldowns |
+| **Notifications** | Which events ring the bell, and push channels |
+| **System** | Version, uptime, storage, bridges, and every effective setting with its source |
 
-For supported controls, flags override environment variables, which override
-saved SQLite settings, explicit YAML values, and built-in defaults in that order.
-The effective configuration view shows each value's source. An environment or
-flag override locks its dashboard control. Reset removes the saved value and
-returns to deployment/default configuration. It never modifies YAML.
+Choose **Save changes** after an edit. Changes apply to new requests straight away;
+requests already running keep the settings they started with.
 
-Existing installations retain their configuration until an operator saves an
-override. A saved override survives restart and wins over later YAML edits.
-Remove it with Reset when returning ownership to YAML. The deprecated translation
-switch retains its existing environment compatibility behavior.
+## Which value wins
 
-Settings changes validate and persist as one revision. Concurrent edits return
-409 rather than overwriting another operator's work. Reload Settings after a
-conflict and reapply the intended change. Persistence failure leaves the previous
-runtime policy active.
+A setting can come from several places. The first one that is set wins:
 
-YAML retains its existing validation/default behavior: a nonpositive
-`retry.retries` normalizes to three. Saving `retries: 0` through Settings disables
-same-hop retries; removing that saved override returns to the YAML/default policy.
+1. a command-line flag,
+2. an `EZLLM_*` environment variable,
+3. a value saved in Settings,
+4. `config.yaml`,
+5. the built-in default.
 
-## Live changes
+A setting fixed by a flag or an environment variable is locked in the dashboard: change it
+on the host. **Reset to deployment default** removes the value saved in Settings, so
+`config.yaml` or the default applies again. It never changes `config.yaml`.
 
-Translation, retries, attempt budget, dispatch deadline and cooldown policy are
-captured at HTTP request admission. Updates apply to subsequent requests; active
-requests keep their admitted policy. Dispatch deadlines bound choosing/retrying,
-not the winning stream. Existing cooldown expiry times are preserved.
+**System** → **Effective configuration** shows each value and where it came from.
 
-Catalog refresh interval and price-refresh switches reschedule future work.
-Already-running jobs may finish; scheduled jobs do not overlap another scheduled
-run of the same kind. Automatic probing controls future automatic probe jobs.
-Manual provider/price tools remain available.
+The listen address, file locations, trusted proxies, bridges and backup storage are set
+only on the host, never in the dashboard.
 
-Network binding, database/key locations, trusted proxies, bridge executables,
-CLI logins and backup paths/secrets remain deployment-managed.
+If someone else saved Settings while you were editing, saving fails instead of overwriting
+their change. Choose **Reload Settings** and make your change again.
 
-## Timezones and budgets
+## Timezone
 
-`usage_timezone` controls default report day bucketing, inherited model-rule
-windows, and the daily price/backup schedules. An explicit report `tz` query still
-wins. The dashboard requires an impact acknowledgement before a timezone change.
+**General** → **Usage timezone** takes a name such as `Europe/Berlin`. It decides:
 
-Model rules with `win_tz: instance` follow the admitted request's instance timezone.
-New rules default to this mode. Explicit rule timezones remain independent;
-existing empty rule timezones are migrated to explicit UTC, preserving their old
-boundaries. Existing explicit values, including Asia/Kuala_Lumpur, are preserved.
+- where a day starts and ends in reports,
+- the windows of rules set to **Instance timezone**,
+- the days and months of app key budgets,
+- the time of daily price refreshes and backups.
 
-Inherited rule usage is computed from committed ledger timestamps in the chosen
-calendar range. This avoids mixing counters that share a bucket name but were
-created under different timezone boundaries. Historical rows/counters are not
-rewritten. An instance timezone change can immediately alter remaining inherited
-budget. Client-token budgets retain their existing server-local boundaries and
-reservation settlement contract.
+Changing it moves those boundaries at once, so a rule can have more or less left for
+today. Tick the box that says you understand, then save. Rules with their own timezone keep
+it. Report rows already written are not changed.
 
-## Security and diagnostics
+`EZLLM_USAGE_TZ` sets it from the host instead. Nothing else sets ezllm's timezone.
 
-Password changes still revoke every dashboard session. The session list shows
-opaque management IDs, creation/expiry times, and bounded browser descriptions.
-Descriptions come from the browser and are informational. Individual revocation
-and sign-out-all take effect immediately; revoking the current browser signs it
-out. Legacy descriptions may be unavailable.
+## Release check
 
-Notification preferences apply to future bell events, including backup failures;
-existing notification history remains. No external notification delivery is added.
+A minute after it starts, and then daily, ezllm asks GitHub for the latest release. When
+there is a newer one, the version in the sidebar lights up, **System** shows it, and the
+bell rings once. Nothing about your ezllm is sent and nothing is installed.
 
-System diagnostics use an explicit allowlist: version, uptime, database byte size,
-bridge readiness, safe deployment metadata (listen address/source, storage kind,
-master-key source and trusted proxy count), runtime settings/provenance, job
-timestamps, and backup status. They contain no credentials, prompts, request bodies, raw environment dumps, or
-filesystem paths. Readiness records bridge startup status, not an active vendor
-inference probe. `/healthz` remains exactly `status` and `version`.
+Turn it off in **General**, or with `EZLLM_UPDATE_CHECK=off`.
+
+## Password and browsers
+
+Changing the password signs out every browser. **Security** lists signed-in browsers; you
+can sign out one, or all with **Sign out all devices**.
+
+## Retries and pauses
+
+| Setting | What it does |
+|---|---|
+| **Retries per model** | Retries of a temporary failure on the same provider, 0 to 9. `0` turns them off |
+| **Total request attempt budget** | Attempts across all providers and retries, 0 to 64. `0` means no limit |
+| **Dispatch deadline** | The longest time spent choosing a provider and waiting to retry. Answers already streaming are not cut off |
+| **Rate-limit pause** | How long a provider rests after a `429` without `Retry-After` |
+| **Server-error pause** | How long a provider rests after server errors, and after `408` or `425` |
+| **Failures before a pause** | How many failures start a pause |
+
+A provider that is resting shows **paused** with the time left, on its card in
+**Providers** and on the model in **Combos**. After fixing the cause (a topped-up
+balance, a lifted limit), choose **Resume** to send it traffic again at once. A real
+failure pauses it again.
+
+A provider with several keys uses all of them. Each request starts on the next key in
+turn, so traffic is spread evenly. A rate limit (`429`) or a refused key (`401`, `403`)
+pauses only that key for that model, and the request moves straight on to the provider's
+next key. A server error (`5xx`) is the provider's fault, not the key's, so the other keys
+are not tried for that model. The provider shows **paused** only when every key is.
+
+In `config.yaml`, `retry.retries: 0` means the default of 3. To turn retries off, save `0`
+in Settings.
+
+## Keys in the URL (Gemini)
+
+Apps written for Google's Gemini API send their ezllm key in the `x-goog-api-key`
+header, and that always works. Some also offer to put the key in the address
+(`?key=…`). ezllm refuses that unless you turn on **Accept keys in the URL** in
+Settings → Gateway.
+
+Leave it off if you can. An address is written to reverse-proxy access logs, browser
+history and error reports, and anyone who reads them can copy the key. If one app needs
+it, give that app its own key with a budget, and keep your proxy's logs private.
+
+## Early warnings
+
+Notifications also warns you before something runs out:
+
+- **Quota nearly used**: a provider has used 80% of a quota window. Said once per window.
+- **Balance running low**: a prepaid balance is under 2 in the provider's currency. Said once each time it drops under; a top-up re-arms it.
+- **Session cookie expiring**: a pasted session cookie expires within 48 hours. Said once per cookie.
+
+Each has its switch and its threshold in Settings → Notifications. ezllm reads every
+enabled provider's quota once an hour for these, the same read as the **Quota**
+button, and the provider card shows the latest reading. A provider with no quota
+page is skipped. A provider whose quota page refuses its sign-in is said once, as
+**Can't read … usage: its sign-in was refused**, and isn't read again until you change
+its settings or key. Quota readings older than 30 days are deleted; each key keeps its newest.
 
 ## Push channels
 
-Notifications → Push channels sends bell events to ntfy, Discord, Telegram or
-any JSON webhook as they happen. The per-event toggles still decide which
-events exist; each channel then takes those at or above its minimum severity
-(everything, warnings and errors, or errors only — warnings and errors by
-default). A recurring event that folds into one unread bell row is pushed
-again at most once a day.
+**Notifications** → **Push channels** sends bell events to ntfy, Discord, Telegram or any
+JSON webhook as they happen. You can have up to ten.
 
-Add a channel, then **Send test**: the editor tests the draft before it is
-saved, and a saved row's test records the outcome as its status. Secrets (the
-ntfy token, the Discord webhook URL, the Telegram bot token, the webhook URL
-and bearer) are stored encrypted with the master key, never shown again, and
-kept on an edit when their field is left blank. Delivery is in the background
-— 10 s per attempt, three attempts for a network failure, 429 or 5xx, no
-redirects followed — and a failing channel shows *Failing* with the reason; it
-never raises a bell event about itself. At most ten channels. On ntfy.sh anyone
-who knows a topic can read it: choose one that is hard to guess, or protect it
-with an access token. API: docs/API.md § Push channels.
+1. Choose **Add channel** and fill it in.
+2. Pick a **Minimum severity**: **Everything**, **Warnings and errors** (the default) or
+   **Errors only**.
+3. Choose **Send test**. It tests the channel before you save it.
 
-## Backup automation and daily schedules
+The event switches above still decide which events exist. An event that repeats is pushed
+at most once a day.
 
-Use the [recovery runbook](recovery-runbook.md) to configure the mounted
-backup destination and separate encryption secret. Scheduling defaults to off;
-when enabled, defaults are daily at 03:00 with seven verified backups retained.
-A manual backup is available without enabling the schedule. A job verifies the
-snapshot and credential decryption before publishing the encrypted archive;
-retention begins only after successful publication.
+Tokens and webhook addresses are stored encrypted and never shown again. Leave the field
+empty when you edit a channel to keep the saved one. A channel that keeps failing shows
+**Failing** with the reason.
 
-Daily schedules use the current instance timezone. A skipped DST hour uses the
-first valid minute after the gap, and a repeated hour uses its first occurrence.
-Changing an hour/timezone reschedules future work; it does not cancel active jobs.
+On ntfy.sh anyone who knows a topic can read it: pick one that is hard to guess, or use an
+access token.
 
-An unavailable destination does not prevent gateway startup or unrelated policy
-edits. Enabling automation checks storage; each job checks again and reports
-failures independently. A configured backup secret file must remain readable at
-startup. Backup status/history is described in the recovery runbook.
+## Backups
 
-## Browser preferences
+**Backup & Recovery** has **Back up now**, **Scheduled backups** and exports. Setting up
+the backup folder: [back up and restore](recovery-runbook.md).
 
-Theme, reduced motion and default analytics range are local to each browser.
-Dark theme and a 24-hour analytics range remain the defaults. Motion follows the
-OS unless Reduce motion is selected; the app never overrides an OS request for
-less motion. Changing an analytics page's range does not change the saved default.
+## Diagnostics
+
+**System** → **Download sanitized diagnostics** saves a file to share when you ask for
+help. It has the version, uptime, database size, bridge status, settings and job times. It
+has no keys, prompts, request bodies, environment or file paths.
+
+Bridge status there means the bridge started; it does not send a test request.
+
+## This browser
+
+Theme, motion and the default analytics range are saved in each browser, not in ezllm.
+Motion follows your system unless you choose **Reduce motion**.
+
+---
+
+**API:** [Settings and push channels in API.md](API.md)

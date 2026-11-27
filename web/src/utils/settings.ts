@@ -26,7 +26,7 @@ const whole = (v: unknown, lo: number, hi: number, what: string): string => {
 export function settingError(key: string, value: unknown): string {
   const text = String(value ?? '').trim();
   switch (key) {
-    case 'usage_timezone': return text && validTimezone(text) ? '' : 'Use an IANA timezone name, for example Asia/Kuala_Lumpur.';
+    case 'usage_timezone': return text && validTimezone(text) ? '' : 'Use an IANA timezone name, for example Europe/Berlin.';
     case 'catalog_interval': { const ms = parseDuration(text); return ms !== null && ms >= 60_000 ? '' : 'Use a duration of at least 1m, for example 12h.'; }
     case 'dispatch_deadline': { if (text === '') return ''; const ms = parseDuration(text); return ms !== null && ms >= 1000 ? '' : 'Use a duration of at least 1s (for example 30s), or leave it empty for no deadline.'; }
     case 'cooldown_429':
@@ -36,6 +36,22 @@ export function settingError(key: string, value: unknown): string {
     case 'cooldown_strikes': return whole(value, 1, 1_000_000, 'The failure count');
     case 'backup_hour': return whole(value, 0, 23, 'The hour');
     case 'backup_keep': return whole(value, 1, 365, 'The number of backups');
+    case 'alert_quota_percent': return whole(value, 1, 100, 'The percent');
+    case 'ledger_retention_days': { const n = Number(value); return n === 0 || (Number.isInteger(n) && n >= 32 && n <= 3650) ? '' : 'Use 0 to keep every call, or a whole number of days from 32 to 3650.'; }
+    case 'alert_cookie_hours': return whole(value, 1, 720, 'The number of hours');
+    case 'alert_balance_below': { const n = Number(value); return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? '' : 'Use an amount above 0, for example 2.'; }
     default: return '';
   }
+}
+
+// effectiveText says what a value MEANS for its setting: 0 retries is off,
+// a 0 attempt budget and an empty deadline are no limit, a switch is On/Off.
+// "Unlimited" for every empty value read wrong for most settings.
+export function effectiveText(key: string, v: unknown): string {
+  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if (v === 0 && key === 'retries') return '0 (off)';
+  if (v === 0 && key === 'attempt_budget') return '0 (no limit)';
+  if (v === 0 && key === 'ledger_retention_days') return '0 (keep every call)';
+  if (v === '' || v == null) return key === 'dispatch_deadline' ? 'No limit' : '–';
+  return String(v);
 }

@@ -61,7 +61,7 @@ func parseAdaptedRequest(cr chatRequest) (Request, error) {
 		return Request{}, invalidTools("messages must not be empty")
 	}
 	if cr.ResponseFormat != nil && cr.ResponseFormat.Type != "" && cr.ResponseFormat.Type != "text" {
-		return Request{}, invalidTools("response_format cannot be combined with the experimental tool adapter")
+		return Request{}, invalidTools("response_format cannot be combined with caller tools")
 	}
 	a := &toolAdapter{Choice: "auto", Parallel: true}
 	if cr.ParallelTools != nil {
@@ -92,7 +92,7 @@ func parseAdaptedRequest(cr chatRequest) (Request, error) {
 		var schemaValue any
 		_ = json.Unmarshal(t.Function.Parameters, &schemaValue)
 		if hasSchemaRef(schemaValue) {
-			return Request{}, invalidTools("experimental tool parameters must be inline schemas without $ref")
+			return Request{}, invalidTools("tool parameters must be inline schemas without $ref")
 		}
 		var typ string
 		if json.Unmarshal(schema["type"], &typ) != nil || typ != "object" {
@@ -185,7 +185,7 @@ func parseAdaptedRequest(cr chatRequest) (Request, error) {
 	a.Schema = a.outputSchema()
 	transcriptJSON, _ := json.Marshal(transcript)
 	toolsJSON, _ := json.Marshal(a.Tools)
-	req := Request{Model: cr.Model, Stream: cr.Stream, Effort: normalizeEffort(cr.ReasoningEffort), Adapter: a}
+	req := Request{Model: cr.Model, Stream: cr.Stream, Adapter: a}
 	if cr.StreamOptions != nil {
 		req.IncludeUsage = cr.StreamOptions.IncludeUsage
 	}

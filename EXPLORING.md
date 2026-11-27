@@ -1,10 +1,10 @@
-# EXPLORING ezllm — Calypso's codebase tour notes
+# EXPLORING ezllm — codebase tour
 
 > **How to use this file:** it's your map for reading ezllm's code — reading order, invariants
 > to verify, and per-milestone file landmarks (§4). Landmarks name a file and a symbol, never a
 > line number: grep the symbol. Keep a milestone's landmarks current as its code evolves.
 >
-> **Decisions live elsewhere:** `docs/*-design.md` and `docs/*-runbook.md` hold the design
+> **Decisions live elsewhere:** `docs/design/` and `docs/*-runbook.md` hold the design
 > records; this file is navigation only.
 
 ---
@@ -12,7 +12,7 @@
 ## 1. 60-second mental model
 
 ```
-client (Claude Code / Hermes / curl / anything OpenAI- or Anthropic-speaking)
+client (Claude Code / curl / anything OpenAI- or Anthropic-speaking)
    │  /v1/chat/completions · /v1/messages · /v1/responses   (bearer or x-api-key = client token)
    ▼
 ┌──────────────────────── ezllm (Go, 127.0.0.1:20129) ──────────────────────┐
@@ -39,36 +39,36 @@ protocols; compression and per-hop reasoning rules can also change requests.
 ## 2. Quick start (run these before reading code — read after seeing it live)
 
 ```bash
-cd ~/workspace/ezllm
+cd ezllm
 make build && make run          # or: go run ./cmd/ezllm -config config.yaml
 curl -s localhost:20129/healthz
-curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" | python3 -m json.tool
+curl -s localhost:20129/v1/models -H "Authorization: Bearer $EZLLM_TOKEN" | python3 -m json.tool
 # real call (streaming, watch it print incrementally):
 curl -N localhost:20129/v1/chat/completions \
-  -H "Authorization: Bearer $EZLLM_TOKEN_HERMES" -H "Content-Type: application/json" \
-  -d '{"model":"opengo/qwen3.8-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
+  -H "Authorization: Bearer $EZLLM_TOKEN" -H "Content-Type: application/json" \
+  -d '{"model":"opencode/qwen3.8-flash","messages":[{"role":"user","content":"count 1-5"}],"stream":true}'
 go run ./cmd/m2verify    # acceptance checker: prints PASS/FAIL per invariant
-# raw SQL equivalent (note: no sqlite3 CLI on this box — use `go run ./cmd/m2verify`):
+# raw SQL equivalent (note: without the sqlite3 CLI, use `go run ./cmd/m2verify`):
 #   SELECT ts,client,surface,account,model,status,ttft_ms,total_ms,
 #          tokens_in,tokens_out,tokens_cached_read,tokens_cached_write
 #   FROM calls ORDER BY id DESC LIMIT 5;
 ```
 
 **Expect:** `ttft_ms` noticeably smaller than `total_ms` (that gap = streaming working; if they're
-equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/proxy.go` and find out why).
+equal, something is buffering — go read `streamCopyTracked` in `internal/proxy/stream.go` and find out why).
 
 ## 3. Reading order (per milestone)
 
 | # | Read first | Then | Ask yourself |
 |---|-----------|------|--------------|
 | M1 | `cmd/ezllm/main.go` → `internal/config` → `internal/server` | `config.example.yaml` | Where would I add a fourth account? (config seeds; the DB is runtime truth) |
-| M2 | `internal/proxy/proxy.go` (`Forward` → `streamCopyTracked` → `UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
+| M2 | `internal/proxy/proxy.go` (`Forward`) → `stream.go` (`streamCopyTracked`) → `proxy.go` (`UsageTapper.Observe`) → `internal/store/ledger.go` (`NormalizeUsageWith`) | `git show` of M2 | How do native streaming and translated streaming differ? |
 | M3 | `internal/registration` + `internal/provider/adapters.go` + admin handlers in `internal/server` | `docs/API.md` | Can I trace an account from DB row → adapter → first upstream byte? |
 | M4 | `internal/router` (hops → strategies → key pick/cooldown) + `internal/rules` | `go test -short ./internal/router ./internal/rules` | What happens on 429 with 1 key left? (answer must be in a test) |
-| M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
+| M5 | `internal/compress` (engines + stage pipeline) + `internal/server/compression.go` | `docs/design/compression-design.md` | Where is "never touch final turn / tool results" enforced, and where does fail-open live? |
 | M6 | `internal/store/ledger.go` (`UsageReport`) → `/admin/usage` · `/admin/requests` · `/admin/stream` + `web/src` | `docs/API.md` + a dashboard login | Can I kill -9 it and restart without corrupting the ledger? Does the dashboard render anything pre-auth? (it must not) |
 | M7 | `internal/compress/rtk.go`, `caveman.go` + `internal/rules` windows/caps | `tests/prove_*.py` (live proofs) | After compression, do ledger rows still carry faithful pre/saved token counts? |
-| M8 | `internal/router/router.go` `checkPin` + `internal/server/admin.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
+| M8 | `internal/router/router.go` `checkPin` + `internal/server/admin_models.go` `handleSetModelPin` | `internal/router/pin_test.go`, `internal/server/pinsurface_test.go` | Where does a refusal stop the request — before or after the upstream dial? Does every switch that renders a typed router error have a case for `ErrPinned`? |
 
 ## 4. Milestone landmarks
 
@@ -79,7 +79,7 @@ names the pre-fix call sites.)*
 ### M1 — skeleton + health ✅ (2026-10-05, verified)
 - `cmd/ezllm/main.go` `run` — flags (`-config`, `-addr`); console logging via
   `internal/logx` (`EZLLM_LOG_LEVEL`, `EZLLM_LOG_COLOR`, `EZLLM_LOG_FORMAT`;
-  `announceLogging` states the effective level at boot, see `docs/logging.md`);
+  `announceLogging` states the effective level at boot, see `docs/design/logging-design.md`);
   first-boot dashboard setup
   (`cmd/ezllm/setup.go`: env password or one-time setup code, env-only by design — it must
   work before config is read); addr precedence `-addr` > `EZLLM_ADDR` > config;
@@ -98,7 +98,7 @@ names the pre-fix call sites.)*
   buggy in the first cut (log showed `client=""`); fixed + re-verified.
 - `statusWriter` — records status/bytes, **`Flush()` forwarded** (the M2 SSE dependency lives
   here, not in the proxy).
-- **Live-verified:** healthz 200 · models 200 w/ token (`client=hermes` in log) · 401 w/o ·
+- **Live-verified:** healthz 200 · models 200 w/ token (client name in log) · 401 w/o ·
   chat 501 stub · bind `127.0.0.1` only · SIGTERM → exit 0 · 0 secrets in log.
 - **M1 invariants proven:** #1 no-secrets-in-logs (grep: 0 hits) · #6 graceful shutdown ·
   #7 loopback default. (#2 SSE, #3 passthrough, #4 retry policy, #5 ledger async = M2/M4)
@@ -139,10 +139,10 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `internal/provider/quota.go` `parsePercentQuota` / `parseMoneyQuota` / `ClassifyQuota`
   — quota shapes differ per provider, so the result is discriminated (`percent|money|tokens|none`)
   and the verbatim JSON is always kept.
-- `internal/proxy/proxy.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
+- `internal/proxy/body.go` `SwapModel` — `map[string]any` round-trip with `UseNumber()`;
   only `model` changes, all 16 observed provider fields survive, big ints don't become floats.
   Rejects `null` explicitly (assigning into a nil map panics — a client could have crashed us).
-- `internal/proxy/proxy.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
+- `internal/proxy/stream.go` `streamCopyTracked` — scanner + `Flush()` per line, re-emitting the `\n`
   the scanner strips so forwarding stays byte-exact. Over-long lines fall back to a raw `io.Copy`.
 - `internal/proxy/proxy.go` `UsageTapper` (`Observe`) — **merges** usage across events
   rather than taking the first hit. Two live-only bugs hid here: Anthropic's `message_start` has
@@ -157,13 +157,13 @@ one function. Then `store.NormalizeUsageWith` (`ledger.go`) for the accounting r
 - `cmd/m2verify/main.go` — acceptance checker that queries the live DB and prints PASS/FAIL per
   invariant. Run `go run ./cmd/m2verify` after any live soak.
 
-**Live-verified 2026-10-06** (opencode-go 36 models + ssn-gpt 11 models synced at boot, 0 warnings):
+**Live-verified 2026-10-06** (opencode-go 36 models + initech-gpt 11 models synced at boot, 0 warnings):
 - `/v1/chat/completions` → 200, and streamed: **TTFB 1.28s vs total 4.08s** = unbuffered
 - `/v1/messages` with `x-api-key` → 200 **tool use** (`stop_reason: tool_use`, real `tool_use` block)
 - `/v1/responses` → 200 `status: completed` with full usage incl. `cache_write_tokens`
-- `super-ssn/gpt-6.1-sol` → 200 (second provider, second adapter kind)
+- `initech/gpt-6.1-sol` → 200 (second provider, second adapter kind)
 - Cached repeat: raw `prompt=2496 cached=2048` → ledger **`tokens_in=448 + cached_read=2048`** ✅
-- Bare `gpt-6-luna` → 404 listing **both** `opengo/` and `super-ssn/` ✅
+- Bare `gpt-6-luna` → 404 listing **both** `demo/` and `initech/` ✅
 - Keys at rest (at M2): **plaintext** (`key_plain`) — the crypto path was implemented +
   test-covered but unwired until `81359d4`; hints only;
   `dropped_rows=0`; `CGO_ENABLED=0` static build ✅
@@ -235,8 +235,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   browser origins; regression-tested — commit `8c832ef`); SPA clears session only on our
   numeric-code 401, provider 401s surface inline (commit `358cda3`).
 - Deployment: `ghcr.io/c4lyp5o/ezllm` image; compose (port 20129) from
-  `compose.example.yml`; the host's own gitignored `compose.yml` adds the Traefik labels
-  (`llm.calypso.dedyn.io`, `/admin` guard); served bundle verified against `web/dist`.
+  `compose.example.yml`; the host's own gitignored `compose.yml` adds any reverse-proxy labels; served bundle verified against `web/dist`.
 - `cmd/m2verify` remains the end-to-end acceptance checker against live traffic. Line-number
   landmarks were stale by ~400 lines in places by 2026-10-10, which is why §4 now cites
   symbols only.
@@ -259,7 +258,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   (`router.go`, called from `selectWire` for the responses override and the native path —
   **before any upstream dial**; lookup errors fail CLOSED; resync preserves pins via
   snapshot/restore in `UpsertModels`). Admin write `PUT /admin/accounts/{id}/model-pin`
-  (`admin.go` `handleSetModelPin` — model id in the body because ids contain `/`; `pin` is
+  (`admin_models.go` `handleSetModelPin` — model id in the body because ids contain `/`; `pin` is
   `json.RawMessage` so absent/""/value are three states; unconfirmed surface → 409 unless
   `force`). Client-facing refusal: `400 pinned_surface` (`resolveErrInfo` in `server.go`) —
   **never a reroute**: switching the path behind the client's back would be dishonest.
@@ -273,10 +272,10 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   the server route `POST /v1/responses` still exists).
 - **`web/dist` ships the UI.** The image build embeds it (`go:embed`, see the Dockerfile), so a `web/src`-only commit deploys the OLD interface with every test green. Rebuild
   + commit dist in the same push; after deploy verify the served hash
-  (`curl https://llm.calypso.dedyn.io/ | grep assets/index-`) + grep one marker string.
+  (`curl https://llm.example.com/ | grep assets/index-`) + grep one marker string.
 
 ### Universal wire matrix (M0–M5) ✅ (2026-10-13, shipped)
-- `docs/universal-wire-design.md` — the architecture; runbook section at the end of
+- `docs/design/universal-wire-design.md` — the architecture; runbook section at the end of
   `docs/translation-runbook.md`.
 - `internal/translate/` — `ir.go` (RequestIR) + `codec_{chat,messages,responses}.go` (one codec
   per surface), `response_ir.go`/`response_codec.go` (ResponseIR, usage convention, errors),
@@ -286,8 +285,9 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 - `internal/router/router.go` — `selectWire` (wire-first), `universalOrder` (fixed fallback
   chains), `pinSurface`, `WithUniversal` (the `messagesConventionReason` gate was removed in
   `61a403c`: usage convention no longer gates a translated Messages hop).
-- `internal/proxy/proxy.go` — `prepareHopBody` (pair-aware codecs), the stream wrapper +
-  `streamOutcomeFrom`, `Result.StreamOutcome` / `StreamCompleted`, `universalCodecOptions`.
+- `internal/proxy/body.go` — `prepareHopBody` (pair-aware codecs), `universalCodecOptions`;
+  `internal/proxy/proxy.go` — the stream wrapper + `streamOutcomeFrom`,
+  `Result.StreamOutcome` / `StreamCompleted`.
 - `internal/store/{schema.sql,store.go,admin.go}` — `accounts.usage_convention` (schema v13),
   `alterAccountUsageConvention`; `internal/provider/provider.go` — the `UsageConvention`
   vocabulary; `internal/config/config.go` — `translation.universal_enabled` (deprecated 2026-10-22,
@@ -300,10 +300,10 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   them like native hops, and a translated success/failure feeds the strategy the same way.
   Earlier revisions parked them outside the strategy ordering; do not reintroduce that tail.
 
-### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/single-parse-dispatch-design.md`)
+### M10 — single-parse dispatch (OPT-1) ✅ (2026-10-15, measured; design `docs/design/single-parse-dispatch-design.md`)
 - **The problem was 5 full JSON decodes per request**: `extractModel`
-  (`server.go`), `IsStream` (`proxy.go`, per attempt), `SwapModel`
-  (`proxy.go`, per hop), `compress.Apply`, `captureShape` (`shape.go`). The fix: `internal/jsonbody/jsonbody.go`
+  (`server.go`), `IsStream` (`body.go`, per attempt), `SwapModel`
+  (`body.go`, per hop), `compress.Apply`, `captureShape` (`shape.go`). The fix: `internal/jsonbody/jsonbody.go`
   `BodyDoc` — one decode (map + `UseNumber` + trailing-garbage check),
   opened once in `inference()` and threaded as an **optional hint**:
   `ForwardCandidatesDoc`, `prepareHopBody(body, rt, doc)`,
@@ -342,7 +342,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
   (n=1000, channel-sync + 5 s failure guards): client→upstream cancel p95
   **63 µs** vs the spec's 20 ms. The §18 row is a certificate now.
 
-### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
+### M12 — gemini-web provider ✅ (2026-10-16, code complete, mock-proven; design `docs/design/gemini-web-design.md`, runbook `docs/gemini-web-runbook.md`)
 - `internal/geminiweb/` — the ported protocol: `frame.go` (wrb.fr frames;
   caught the units-rescan desync), `client.go` (cookie auth + init scrape +
   rotation), `rpc.go` (GET_USER_STATUS = zero-quota oracle + catalog),
@@ -366,7 +366,7 @@ streaming usage taps · TTFT truncating to 0 (now floored at 1ms).
 > dashboard login panel. Do not go looking for them. Replaced by M16 (Copilot subscription bridge);
 > the original design and policy records were removed in v2.0.0 and remain in git history.
 
-### M14 — claude-web provider ✅ (2026-10-16; design `docs/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
+### M14 — claude-web provider ✅ (2026-10-16; design `docs/design/claude-web-design.md`, runbook `docs/claude-web-runbook.md`)
 - `internal/claudeweb/` — the ported protocol. `tlsclient.go` (uTLS
   Chrome-146 via `HelloChrome_Auto` behind an injectable Fetcher — Go's
   native TLS dies at claude.ai's Cloudflare; the REAL handshake runs green
@@ -401,7 +401,7 @@ executable Go probe). Five slices, all local, all gates-green:
   log/search filtered, both wire shapes resolved.
 - WS-B: disjoint input/output compositions (cache-read and cache-write are
   SUBSETS of input), cache-write rendered, honest labels.
-- WS-C scoped (Calypso chose the session memo over the DB epoch table):
+- WS-C scoped (the owner chose the session memo over the DB epoch table):
   internal/compress/sessionmemo.go — TTL'd, session+profile scoped commit
   ledger; committed history replays byte-identical; the ratio floor judges
   new work only. Bugs the tests caught during the build: budget's message
@@ -409,7 +409,7 @@ executable Go probe). Five slices, all local, all gates-green:
   committed (exempt tail never froze); verbatim forms needed freezing too.
 Caveman: please_could_you_tell_me no longer eats the question word (the
 engine forbids capture re-emission, so the word left the pattern);
-drop_there_seems_to_be removed. docs/compression-design.md carries the full
+drop_there_seems_to_be removed. docs/design/compression-design.md carries the full
 corrections section.
 
 ### v1.1 — subscription bridges ✅ (2026-10-23; runbooks `docs/claude-bridge-runbook.md`, `docs/codex-bridge-runbook.md`)
@@ -442,15 +442,15 @@ corrections section.
 - Reasoning effort is a per-model vocabulary: `provider.ParseReasoningRule` reads it out of the
   refusal, `ReasoningRule.Clamp` maps a value onto it, `models.reasoning_vocab` /
   `reasoning_required` (schema v29) keep it, and `proxy.prepareHopBody` applies it per hop
-  without re-encoding an accepted value. Design: `docs/reasoning-effort-design.md`.
-- `deniesModelAccess` (`internal/proxy/proxy.go`) parks a hop on a 401/403 whose body names model
+  without re-encoding an accepted value. Design: `docs/design/reasoning-effort-design.md`.
+- `deniesModelAccess` (`internal/proxy/classify.go`) parks a hop on a 401/403 whose body names model
   access — body-matched, `hasAlternate`-gated, so a bare 403 still changes no state.
-- Console logging has a written contract: `docs/logging.md` (levels, what is never logged, the
+- Console logging has a written contract: `docs/design/logging-design.md` (levels, what is never logged, the
   measured cost of an argument built for a filtered line). `accessLog` carries `alias` and the
   failover trail from `reqInfo`; refusals before dispatch are visible at `debug`;
   `EZLLM_LOG_FORMAT=json` opts into one object per line.
 
-### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
+### v1.3.0 — Antigravity subscription bridge ✅ (2026-10-26; design `docs/design/antigravity-subscription-design.md`, runbook `docs/agy-bridge-runbook.md`)
 - `internal/agybridge/` — Google Antigravity plan behind a loopback OpenAI surface:
   `runner.go` `Run` spawns `agy --print=` headless per request in a fresh empty workspace,
   kills a turn whose `init` reports a loose permission mode; `preflight.go` `RunPreflight`
@@ -494,7 +494,7 @@ corrections section.
   coverage is in `web/tests/verify-railway.mjs`, `verify-neighbourhood.mjs`,
   `verify-neighbourhood-polish.mjs` and `shot-city.mjs`.
 
-### v1.6.0 — bridge CLI auto-update and push channels ✅ (2026-10-31; runbook `docs/bridge-update-runbook.md`, spec `SPEC-bridge-update.md`)
+### v1.6.0 — bridge CLI auto-update and push channels ✅ (2026-10-31; runbook `docs/bridge-update-runbook.md`, spec `docs/design/SPEC-bridge-update.md`)
 
 Three layers, read in this order. **The gate:** `cmd/ezllm/bridgecheck.go`
 `runBridgeCheck` (the boot checks, stricter: drift refuses) and `--live`
@@ -614,14 +614,14 @@ examples of a class of bug rather than as history.
   `proxy.refusesHistory` treats "this model needs the reasoning of every earlier
   turn" as a hop fact (fail over, no park, cause `reasoning_echo_required`).
 
-`docs/reasoning-effort-design.md` carries the amendment that explains how the first
+`docs/design/reasoning-effort-design.md` carries the amendment that explains how the first
 one shipped, because "documented but in a function the linker removed" is a failure
 mode this codebase has now hit twice.
 
 ### v1.4.0 — account safety and dashboard reliability
 
-- `internal/server/admin.go` `handleRetest` checks the key's owning account;
-  `internal/store/admin.go` `EnableKey` scopes the update to the account.
+- `internal/server/admin_accounts.go` `handleRetest` checks the key's owning account;
+  `internal/store/admin_models.go` `EnableKey` scopes the update to the account.
   `internal/server/key_ownership_test.go` covers cross-account refusals.
 - `internal/server/dashboard_auth.go` `reserveLogin` bounds tracked sources
   and counts in-flight attempts. `internal/server/geminiweb_bridge.go`
@@ -652,7 +652,7 @@ the columns it wrote stay in the ledger as history. The reasoning is worth
 keeping: **measure before building the hot path, and check that your instrument
 can see the failure you are trying to prevent.**
 
-### M16 — GitHub Copilot subscription bridge ✅ (2026-11-05; design `docs/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`)
+### M16 — GitHub Copilot subscription bridge ✅ (2026-11-05; design `docs/design/copilot-cli-bridge-design.md`, runbook `docs/copilot-bridge-runbook.md`)
 - `internal/copilotbridge/channel.go` — the path every turn takes: one
   `copilot --headless --stdio` child per request by default (opt-in warm reuse in
   `pool.go` with a fresh session per request), LSP-framed JSON-RPC, single-threaded
@@ -667,12 +667,12 @@ can see the failure you are trying to prevent.**
   **stdin** (argv caps at 128 KB and real prompts are 250–600 KB).
 - `internal/copilotbridge/bridge.go` — `chat`: a gate refusal
   (`chat_tools_unsupported`) falls back to `-p` for plain chat and stands for a request
-  with tools, which the router fails over on (`proxy.go` `refusesTools`).
+  with tools, which the router fails over on (`classify.go` `refusesTools`).
 - `cmd/ezllm/copilotbridge.go` — boot wiring, the channel probe behind `/status`, and
   `copilotCatalog`: `auto` first (the key test probes the first candidate), then every
   id `copilot help config` documents. The plan decides per request with a typed 403.
 - `internal/copilotbridge/checks.go` — the `bridge-check copilot` surface:
-  `RunPreflight` (binary, version, channel protocol 3 + `session.create`, all free)
+  `RunPreflight` (binary, version, channel protocol 3 or 4 + `session.create`, all free)
   and `LivePlain`/`LiveTools` (the only things that prove the login and the tool
   batch). `QualifiedVersion` lives here.
 - `internal/provider/copilotbridge.go` — `KindCopilotBridge` (`copilot-bridge`), an adapter
@@ -681,7 +681,7 @@ can see the failure you are trying to prevent.**
   Copilot", kind `copilot-bridge`); `web/src/pages/Providers.tsx` — the "GitHub Copilot
   (bridge)" preset, which replaced the device-flow panel.
 
-### M15 — hop stream health ✅ (2026-11-05; design `docs/hop-health-design.md`)
+### M15 — hop stream health ✅ (2026-11-05; design `docs/design/hop-health-design.md`)
 
 A hop that sends `200` and then dies mid-body was healthy by every number the
 product had: it committed, it wrote a ledger row, its account stayed enabled.
@@ -715,6 +715,34 @@ while the SAME model on `opencode-go` was 0/754.
   attention names the hop, zero console errors, 390px zero overflow.
 - No routing action yet, deliberately: the park rule is justified by THIS
   measurement, not by a plausible number (the M2 lesson).
+
+### v2.3.0 — Get started, the Gemini API, ledger retention, early warnings, a new Neighbourhood
+
+- `server/gemini.go` serves the Gemini API: `handleGeminiAction` takes
+  `generateContent`, `streamGenerateContent` and `countTokens`, `handleGeminiModels` /
+  `handleGeminiModel` the model list; `geminiAuthed` accepts the key the Gemini SDKs
+  send. `gemini_convert.go` maps the body onto the shared request.
+- `store/retention.go` `RollUpLedger` rolls calls older than `ledger_retention_days`
+  into `calls_daily` (schema v39), so usage totals survive after the rows go.
+- `server/import.go` `handleImport` plans (`planImport`, the dry run) and then applies
+  (`applyImport`) a configuration export.
+- `server/alerts.go` builds the early warnings: `quotaAlerts` (quota and low balance,
+  deduplicated per drop via `store.BalanceLastAtOrAbove`), `cookieAlert`, and
+  `readQuotaForAlerts`, which stops reading a usage page that refused its sign-in
+  (`quotaRefusal`) until `credentialMark` changes.
+- `router/keys.go` `expandKeys` / `nextKeyTurn` turn one provider into one hop per key,
+  taking turns, so a parked key leaves the others serving.
+- `server/admin.go` `handleRouteExplain` answers what a request would do now, without
+  sending one; `hopParks` names the cooldowns in the way.
+- `server/update_check.go` `checkForUpdate` asks GitHub once a day (`fetchLatestRelease`,
+  `newerRelease`) when `update_check` is on.
+- `cmd/ezllm/keycmds.go` `runRotateMasterKey` and `runTokenCreate` are the
+  `rotate-master-key` and `token create` commands.
+- Dashboard: `web/src/components/CommandPalette.tsx` is Ctrl+K;
+  `web/src/components/CityScene.tsx` and `web/src/utils/city.ts` are the redesigned
+  Neighbourhood (`docs/design/neighbourhood-design.md`). In `web/src/App.tsx` a page
+  change is entrance-only and mounts the new page once; the leaving page's exit used to
+  render the new route and mount it twice.
 
 ### v2.2.0 — shared bridge admission, requests per turn, shared bridge helpers
 
@@ -785,7 +813,7 @@ while the SAME model on `opencode-go` was 0/754.
 - Dashboard: Connect picks roles with independent checkboxes and shows a Prometheus job; the
   sidebar footer is three icon buttons; interface text was rewritten in plain language.
 
-### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`; audit `docs/security-audit-2026-11-14.md`)
+### v2.0.0 — bridge caching, Codex fidelity, security remediation ✅ (2026-11-14; runbooks `docs/codex-bridge-runbook.md`, `docs/bridge-update-runbook.md`)
 
 - `internal/codexbridge/cache.go` `borrowTemplate` / `forkTemplate` — empty
   persisted parent threads forked per request for prompt-cache affinity across
@@ -803,9 +831,9 @@ while the SAME model on `opencode-go` was 0/754.
 - `internal/copilotbridge/session_cache.go` and `internal/agybridge/session_cache.go`
   — opt-in exact-history conversation reuse with per-request usage deltas;
   `internal/agybridge/tools.go` `parseAdaptedRequest` — Antigravity caller tools
-  through structured output (`EZLLM_AGY_EXPERIMENTAL_TOOLS`).
+  through structured output (on whenever the CLI offers `--json-schema`).
 - `internal/server/admission.go` `newAdmission` — bounded inference admission and
-  body-memory reservations; `internal/proxy/proxy.go` `copyResponseHeaders` strips
+  body-memory reservations; `internal/proxy/headers.go` `copyResponseHeaders` strips
   provider `Set-Cookie`/`Set-Cookie2`/`Clear-Site-Data`.
 - `cmd/ezllm/bridgecheck.go` + `scripts/bridge_update.py` — CLI updater gates that
   qualify sandbox, cache and native-history modes before promoting a binary.
@@ -824,7 +852,7 @@ while the SAME model on `opencode-go` was 0/754.
   outstanding, one bridge per change. Keep Codex RPC/sandbox/tool-turn lifecycle
   and Copilot channel/early-tool/usage/warm-pool behavior adapter-owned.
 - Scope, baseline results and migration acceptance live in
-  [the shared transport design](docs/shared-bridge-transport-design.md).
+  [the shared transport design](docs/design/shared-bridge-transport-design.md).
 
 ## 5. Invariants to check while reading (review checklist)
 
@@ -859,19 +887,15 @@ These are the "if it's broken here, the project failed" spots — each must be v
 
 ## 6. Key facts you'll need while exploring (provider facts measured 2026-10-06 … 10)
 
-- Go **1.27** (`go.mod`) at `~/.local/go/bin/go` (PATH wired; apt's 1.22 is shadowed fallback)
-- Keys (0600, never in repo/config): `~/.hermes/secrets/opencode-go.txt`,
-  `~/.hermes/secrets/ssn-gpt.txt`, `~/.hermes/secrets/bailian-coding-plan.txt`,
-  `~/.hermes/secrets/xiaomi-mimo-token-plan.txt`;
-  ezllm client/admin tokens: `ezllm-infer.token`, `ezllm-admin.token`;
-  field-encryption master key `ezllm-master.key` (wired since `81359d4` — see M2 landmarks)
+- Go **1.27** (`go.mod`) (a distro's older Go will not do)
+- Keys stay in 0600 files outside the repo and config; the field-encryption master key `ezllm-master.key` (wired since `81359d4` — see M2 landmarks)
 - opencode-go **requires** `x-opencode-session` for generation (+`x-opencode-request` recommended).
   Missing → `400 MissingSessionID`. **But `/v1/models` and `/v1/usage` need NO session header.**
 - ⚠️ **`GET /v1/models` on opencode-go is UNAUTHENTICATED** — it returns 200 + the full catalog for
   an empty key, `not-a-key`, even `sk-`. Never use it as a credential check. The auth oracle is
   **`GET /v1/usage`** (401 on a bad key, 200 on a good one, no session header, ~0.75 s, 0 tokens).
-  ssn-gpt's `/models` *does* 401 — **auth behaviour is per-provider, so never assume.**
-- ⚠️ Cloudflare `403 "error code: 1010"` on space.stationine.com is a **User-Agent block on
+  initech-gpt's `/models` *does* 401 — **auth behaviour is per-provider, so never assume.**
+- ⚠️ Cloudflare `403 "error code: 1010"` on api.example.com is a **User-Agent block on
   `python urllib`**, not a rate limit. Go's default UA is fine (200 everywhere), and 12 rapid curls
   were never blocked. Practical rule: **403 = bad credentials → fail fast**; retry/backoff only for
   429/5xx/timeout. Don't write probing scripts in Python against that host.
@@ -887,7 +911,7 @@ These are the "if it's broken here, the project failed" spots — each must be v
   `message_start` **+** `message_delta` (merge them — start reports `output_tokens: 0`), Responses
   on `response.completed` **or `response.incomplete`** when `max_output_tokens` truncates.
 - Quota shapes differ per provider on the *same* path: opencode-go → `percent`
-  (`{usage:{rolling,weekly,monthly}{percent,resetsAt}}`), ssn-gpt → `money`
+  (`{usage:{rolling,weekly,monthly}{percent,resetsAt}}`), initech-gpt → `money`
   (`{balance: 0.2563, unit: "USD", planName: 钱包余额, usage:{today,total}, daily_usage[], model_stats[]}`).
 - **Auth-error status is per-provider — never assume.** Measured with bogus keys (2026-10-09/10):
   Gemini `…/v1beta/openai` → `400` "Please pass a valid API key" (the only kind where 400 counts
@@ -909,13 +933,13 @@ These are the "if it's broken here, the project failed" spots — each must be v
   M2 was rejected 2026-11-04 and the code is deleted: the prize was 89.8% frozen
   counters from tools that had stopped shipping, the live dead tax was 481
   tokens/request (0.9%), and usage was derived from the *request* body only, so
-  the one client that uses tools on every call (`dis-intelligence`, reading its
+  the one client that uses tools on every call (reading its
   `tool_use` out of the *response*) read `used_sessions = 0` across all 23 tools
   — prune mode would have deleted its whole catalog on structurally blind
   evidence. Trim catalogs source-side instead. Full verdict + re-open conditions:
   `CHANGELOG.md` § "removed: tool pruning".
 - Silent translation — every surface can reach every wire since the universal wire matrix
-  (`docs/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
+  (`docs/design/universal-wire-design.md`), but only onto hops a probe sweep PROVED, with native
   passthrough preferred, and the surface pin still refuses instead of rerouting.
 - No multi-node / Postgres — single-writer SQLite, one home box.
 - No guessing on quota: quotas come from provider usage endpoints (or, for Command Code, its

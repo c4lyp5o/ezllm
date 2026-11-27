@@ -22,10 +22,12 @@ export function accountIssues(a: Account, now = Date.now()): Issue[] {
     }
   }
   const q = a.quota;
-  const pcts: [string, number][] = [];
-  if (q?.percent_rolling != null) pcts.push(['rolling', q.percent_rolling]);
-  if (q?.percent_weekly != null) pcts.push(['weekly', q.percent_weekly]);
-  if (q?.percent_monthly != null) pcts.push(['monthly', q.percent_monthly]);
+  // Groups replace the window they add up to: one full group leaves the others usable.
+  const pcts: [string, number][] = (q?.groups ?? []).map((g) => [g.name, g.percent]);
+  const grouped = pcts.length > 0;
+  if (!grouped && q?.percent_rolling != null) pcts.push(['rolling', q.percent_rolling]);
+  if (!grouped && q?.percent_weekly != null) pcts.push(['weekly', q.percent_weekly]);
+  if (!grouped && q?.percent_monthly != null) pcts.push(['monthly', q.percent_monthly]);
   const worst = pcts.sort((x, y) => y[1] - x[1])[0];
   if (worst && worst[1] >= 90) {
     out.push({ id: `quota-${a.id}`, tone: worst[1] >= 100 ? 'bad' : 'warn', text: `${a.name}: ${worst[0]} quota at ${Math.round(worst[1])}%`, fix: 'open' });

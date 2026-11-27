@@ -248,14 +248,14 @@ func TestLedgerRoundTripAndAggregation(t *testing.T) {
 
 	rows := []Call{
 		{TS: now, Client: "claude-code", Surface: SurfaceAnthropic, Alias: "my-stack",
-			Account: "super-ssn", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6.1-sol",
+			Account: "initech", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6.1-sol",
 			Status: 200, Stream: true, TokensIn: 100, TokensOut: 50, TokensCachedRead: 20,
 			RawUsage: `{"input_tokens":100}`},
 		{TS: now, Client: "claude-code", Surface: SurfaceAnthropic, Alias: "my-stack",
-			Account: "super-ssn", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6.1-sol",
+			Account: "initech", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6.1-sol",
 			Status: 200, Stream: true, TokensIn: 200, TokensOut: 60, TokensCachedRead: 40},
-		{TS: now, Client: "hermes", Surface: SurfaceChat, Alias: "opengo/qwen3.8-flash",
-			Account: "opengo", KeyID: 2, KeyHint: "sk…abcd", Model: "qwen3.8-flash",
+		{TS: now, Client: "my-app", Surface: SurfaceChat, Alias: "demo/qwen3.8-flash",
+			Account: "demo", KeyID: 2, KeyHint: "sk…abcd", Model: "qwen3.8-flash",
 			Status: 429, Stream: false, Err: "rate limited"},
 	}
 	for _, r := range rows {
@@ -277,16 +277,16 @@ func TestLedgerRoundTripAndAggregation(t *testing.T) {
 	for _, r := range rep {
 		byKey[r.Key] = r
 	}
-	ssn := byKey["super-ssn"]
+	ssn := byKey["initech"]
 	if ssn.Calls != 2 || ssn.TokensIn != 300 || ssn.TokensOut != 110 || ssn.CachedRead != 60 {
-		t.Errorf("super-ssn aggregate wrong: %+v", ssn)
+		t.Errorf("initech aggregate wrong: %+v", ssn)
 	}
 	if ssn.Errors != 0 {
-		t.Errorf("super-ssn errors = %d, want 0", ssn.Errors)
+		t.Errorf("initech errors = %d, want 0", ssn.Errors)
 	}
-	og := byKey["opengo"]
+	og := byKey["demo"]
 	if og.Calls != 1 || og.Errors != 1 {
-		t.Errorf("opengo aggregate wrong (429 must count as error): %+v", og)
+		t.Errorf("demo aggregate wrong (429 must count as error): %+v", og)
 	}
 
 	// group by client
@@ -324,14 +324,14 @@ func TestLedgerRowsAreImmutableHistory(t *testing.T) {
 	now := time.Now().UTC()
 
 	// insert an account + key, record a call referencing them, then delete both.
-	if _, err := db.Writer().Exec(`INSERT INTO accounts(id,name,namespace,kind,base_url) VALUES(1,'SSN GPT','super-ssn','openai-compatible','https://example.com/v1')`); err != nil {
+	if _, err := db.Writer().Exec(`INSERT INTO accounts(id,name,namespace,kind,base_url) VALUES(1,'Initech GPT','initech','openai-compatible','https://example.com/v1')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Writer().Exec(`INSERT INTO provider_keys(id,account_id,label,key_hint,key_plain) VALUES(1,1,'primary','sk…def0','sk-test-plain')`); err != nil {
 		t.Fatal(err)
 	}
-	db.RecordCall(Call{TS: now, Client: "hermes", Surface: SurfaceChat, Alias: "super-ssn/gpt-6-luna",
-		Account: "super-ssn", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6-luna", Status: 200, TokensIn: 10, TokensOut: 2})
+	db.RecordCall(Call{TS: now, Client: "my-app", Surface: SurfaceChat, Alias: "initech/gpt-6-luna",
+		Account: "initech", KeyID: 1, KeyHint: "sk…def0", Model: "gpt-6-luna", Status: 200, TokensIn: 10, TokensOut: 2})
 	if err := db.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestLedgerRowsAreImmutableHistory(t *testing.T) {
 	if err := db.Reader().QueryRow(`SELECT account, key_hint, tokens_in FROM calls ORDER BY id DESC LIMIT 1`).Scan(&acct, &hint, &tin); err != nil {
 		t.Fatalf("ledger row lost after account deletion: %v", err)
 	}
-	if acct != "super-ssn" || hint != "sk…def0" || tin != 10 {
+	if acct != "initech" || hint != "sk…def0" || tin != 10 {
 		t.Errorf("history not readable after deletion: acct=%q hint=%q in=%d", acct, hint, tin)
 	}
 }

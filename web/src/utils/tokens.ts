@@ -22,6 +22,12 @@ export interface TokenInfo {
   expires_at: string;
   last_used_at?: string | null;
   created_at: string;
+  /** The key's own compression profile (header → key → combo → off). */
+  compression_profile_id?: number | null;
+  /** Tokens used in the current calendar bucket (only when cap_tokens > 0): what the cap enforces. */
+  cap_used?: number;
+  /** Priced spend in the current bucket (only when cap_usd > 0). */
+  spent_usd?: number;
 }
 
 export interface TokenCreated extends TokenInfo {
@@ -31,6 +37,8 @@ export interface TokenCreated extends TokenInfo {
 export type TokenPatch = {
   name?: string; enabled?: boolean; cap_tokens?: number; cap_usd?: number; cap_window?: string;
   allowed_models?: string; expires_at?: string; roles?: Role[];
+  /** null clears the key's profile. */
+  compression_profile_id?: number | null;
 };
 
 export interface V1Model {

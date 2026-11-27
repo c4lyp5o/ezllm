@@ -16,7 +16,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/store"
 )
 
-// The precedence IS the contract (docs/hop-health-design.md): a caller that hung
+// The precedence IS the contract (docs/design/hop-health-design.md): a caller that hung
 // up is never a truncation, and a translated stream's frame-level failure is not
 // the same fact as a dead socket.
 func TestStreamOutcomeLabelPrecedence(t *testing.T) {
@@ -95,7 +95,7 @@ func TestTruncatedStreamIsRecordedAsTruncated(t *testing.T) {
 	if err := db.UpsertModels(ctx, id, []provider.ModelInfo{{ID: "gpt-6-luna", OwnedBy: "flaky"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertClientToken(ctx, "hermes", "tok-infer", "infer"); err != nil {
+	if err := db.UpsertClientToken(ctx, "my-app", "tok-infer", "infer"); err != nil {
 		t.Fatal(err)
 	}
 

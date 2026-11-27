@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ func (e *NativeError) Error() string { return e.Message }
 
 // Runner spawns the official Claude Code CLI once per request. It is the only
 // thing in this package allowed to talk to the subscription — the credential never
-// leaves the CLI's own login store (docs/claude-subscription-design.md, decision 1).
+// leaves the CLI's own login store (docs/design/claude-subscription-design.md, decision 1).
 type Runner struct {
 	Bin           string
 	ConfigDir     string
@@ -108,6 +109,9 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 		return Result{}, fmt.Errorf("claude-bridge: cannot create work dir: %w", err)
 	}
 	defer os.RemoveAll(tmp)
+	if err := linkKeychains(runtime.GOOS, os.Getenv("HOME"), tmp); err != nil {
+		return Result{}, fmt.Errorf("claude-bridge: cannot link the keychain folder: %w", err)
+	}
 
 	settings := map[string]any{"env": map[string]any{"CLAUDE_CODE_EXTRA_BODY": extraBody}}
 	if err := writeJSON(filepath.Join(tmp, "settings.json"), settings); err != nil {
@@ -251,6 +255,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 	_ = stdin.Close()
 
 	res := Result{}
+	sawResult := false
 	for {
 		line, err := next()
 		if err == io.EOF {
@@ -269,6 +274,7 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 				res.NativeError, res.ErrorCode = firstText(f.Message), f.Error
 			}
 		case "result":
+			sawResult = true
 			res.Usage = parseUsage(f.Usage)
 			res.CostUSD = f.TotalCostUSD
 			res.StopReason = f.StopReason
@@ -297,8 +303,24 @@ func (r *Runner) Run(ctx context.Context, req Request, alias string, sink func(F
 			}
 		}
 	}
-	_ = cmd.Wait()
+	waitErr := cmd.Wait()
 	waited = true
+	if !sawResult && res.NativeError == "" {
+		// The CLI always ends a turn with a result frame. Without one it
+		// crashed or its output was unreadable: answering 200 with an empty
+		// message would hide that.
+		why := "exited without a result"
+		if rerr := <-readErr; rerr != nil {
+			why = "output unreadable: " + rerr.Error()
+		} else if waitErr != nil {
+			why = "exited without a result: " + waitErr.Error()
+		}
+		msg := "claude-bridge: the Claude Code CLI " + why
+		if tail := stderrTail.Tail(); tail != "" {
+			msg += " — " + tail
+		}
+		return res, &NativeError{Status: 502, Type: "api_error", Code: "native_error", Message: msg}
+	}
 	if res.NativeError != "" {
 		status, errType := MapNativeError(res.ErrorCode, res.NativeError)
 		return res, &NativeError{Status: status, Type: errType, Code: res.ErrorCode,

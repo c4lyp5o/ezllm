@@ -28,7 +28,7 @@ type CallEvent struct {
 	SavedNotional int64 `json:"compression_saved_notional"`
 	ContextPre    int64 `json:"context_tokens_pre"`
 	ContextSaved  int64 `json:"context_tokens_saved"`
-	// StreamOutcome is how a stream ended (schema v34, docs/hop-health-design.md):
+	// StreamOutcome is how a stream ended (schema v34, docs/design/hop-health-design.md):
 	// completed / truncated / failed / client_gone, or "" for a non-stream.
 	StreamOutcome string `json:"stream_outcome"`
 	// Compression is the ledger stamp: "" (never mentioned), "off" /

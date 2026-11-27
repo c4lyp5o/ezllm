@@ -36,6 +36,8 @@ import {
   axisProps, chartGrid, cursorFill,
 } from '../components/charts';
 import { CountUp, Stagger, StaggerItem } from '../components/motion';
+import { StartBanner } from '../components/StartBanner';
+import { MoreCard } from '../components/MoreCard';
 import {
   Chip, CauseChip, EmptyState, HeaderAside, SectionLabel, Segmented, Skeleton, SkeletonRows, Spinner,
   CopyButton, btn, clockTime, cx, inputCls, relTime, fmtDuration, fmtMs, fmtUptime, formatTokens, nfmt, pct,
@@ -397,7 +399,7 @@ function LatencyCard({ rows }: { rows: UsageRow[] }) {
 
 // A hop that returns 200 and then dies mid-body is healthy by every other number
 // on this page: delivered status, a ledger row, an enabled account. This is the
-// only surface that shows it (docs/hop-health-design.md). Caller hang-ups are
+// only surface that shows it (docs/design/hop-health-design.md). Caller hang-ups are
 // excluded by the server's rate, so "cut of N" is the judged denominator.
 function CutAnswers({ o }: { o: Overview }) {
   const hops = (o.health?.hop_stream_health ?? []).filter((h) => h.truncated > 0 || h.failed > 0);
@@ -431,7 +433,7 @@ function RescuedCalls({ o }: { o: Overview }) {
   const rescued = (o.recent_calls ?? []).filter((r) => failoverNote(r.err));
   if (rescued.length === 0) return null;
   return (
-    <Panel label={<SectionLabel>Routing rescue · failover hops</SectionLabel>}
+    <Panel label={<SectionLabel>Routing rescue · fallbacks</SectionLabel>}
       aside={<span className="text-[12px] text-mute">{rescued.length} rescued</span>}>
       <ul className="space-y-1.5">
         {rescued.slice(0, 8).map((r, i) => (
@@ -510,7 +512,7 @@ function RecentCalls({ o }: { o: Overview }) {
                 { key: 'all', label: `All ${count('all')}` },
                 { key: 'errors', label: `Errors ${count('errors')}`, title: 'status 400 and above' },
                 { key: 'failover', label: `Failed over ${count('failover')}`, title: 'answered after one or more providers were skipped or failed' },
-                { key: 'translated', label: `Translated ${count('translated')}`, title: 'the hop spoke a different wire than the client' },
+                { key: 'translated', label: `Converted ${count('translated')}`, title: 'the provider uses a different API from the client, so ezllm converted it' },
               ]}
               value={filter} onChange={setFilter} />
             <input type="search" value={q} onChange={(e) => setQ(e.target.value)}
@@ -548,8 +550,8 @@ function RecentCalls({ o }: { o: Overview }) {
                     <td className="whitespace-nowrap px-5 py-2 text-mute">
                       {clockTime(r.ts)}
                       {/* The caller address (ledger calls.ip, captured at
-                          request time). Public traffic arrives through traefik
-                          with a real client ip; a row from this box's own
+                          request time). Public traffic arrives through a proxy
+                          with a real client ip; a row from the host's own
                           loopback hits reads as the docker bridge peer. */}
                       {r.ip && (
                         <div className="text-[11px] text-mute/70" title={`caller address: ${r.ip}`}>{r.ip}</div>
@@ -593,8 +595,8 @@ function RecentCalls({ o }: { o: Overview }) {
                           in-tokens are the vendor's INCLUSIVE total. */}
                       {r.translated && (
                         <div className="mt-0.5 text-[11px] text-accent"
-                          title="translated: the provider uses a different API from the client (for example an Anthropic client sent to a chat-only provider), so ezllm converted the request and the answer. Tokens are counted the same way as any other request.">
-                          ⇄ translated
+                          title="converted: the provider uses a different API from the client (for example an Anthropic client sent to a chat-only provider), so ezllm converted the request and the answer. Tokens are counted the same way as any other request.">
+                          ⇄ converted
                         </div>
                       )}
                     </td>
@@ -713,7 +715,19 @@ function RecentCalls({ o }: { o: Overview }) {
 // Quota presentation moved to pages/Providers.tsx — quota data is slotted
 // under the provider it describes; the stale pill became a reload action.
 // ── the dashboard ────────────────────────────────────────────────────────
+// The Get started nudge sits above everything, so it shows even while (or
+// when) the overview cannot load.
 export default function Dashboard() {
+  return (
+    <div className="space-y-6">
+      <StartBanner />
+      <MoreCard />
+      <DashboardBody />
+    </div>
+  );
+}
+
+function DashboardBody() {
   const [o, setO] = useState<Overview | null>(null);
   const [byAccount, setByAccount] = useState<UsageRow[]>([]);
   const [byModel, setByModel] = useState<UsageRow[]>([]);
@@ -839,13 +853,15 @@ export default function Dashboard() {
       return {
         tin: sum((u) => u.tin), tout: sum((u) => u.tout), cread: sum((u) => u.cread), cwrite: sum((u) => u.cwrite),
         calls: sum((u) => u.calls), errors: sum((u) => u.errors),
-        saved: sum((u) => u.saved), contextSaved: sum((u) => u.context_saved),
+        // applied_saved: only rewrites that shipped. `saved` also counts
+        // tokens recorded on declined rows, which never left ezllm shorter.
+        saved: sum((u) => u.applied_saved ?? 0), contextSaved: sum((u) => u.context_saved),
       };
     }
     if (!whole || !fresh) return null;
     return {
       tin: whole.tin, tout: whole.tout, cread: whole.cread, cwrite: whole.cwrite,
-      calls: whole.calls, errors: whole.errors, saved: whole.saved, contextSaved: whole.context_saved,
+      calls: whole.calls, errors: whole.errors, saved: whole.applied_saved ?? 0, contextSaved: whole.context_saved,
     };
   }, [o, range, whole, fresh]);
 
@@ -983,8 +999,8 @@ export default function Dashboard() {
             emptyHint={`No model traffic in the last ${win}.`} />
         </StaggerItem>
         <StaggerItem>
-          <Breakdown label="Tokens by API key" rows={byKey}
-            emptyHint={`No calls with an API key in the last ${win}. Calls without one show as "(none)".`} />
+          <Breakdown label="Tokens by app key" rows={byKey}
+            emptyHint={`No calls with an app key in the last ${win}. Calls without one show as "(none)".`} />
         </StaggerItem>
       </Stagger>
 

@@ -2,7 +2,7 @@
 // official Claude Code CLI (`claude -p`) as the model client. The CLI is the
 // only thing allowed to speak to the Claude subscription: this package never
 // holds or sends the subscription credential itself (see
-// docs/claude-subscription-design.md, locked decision 1).
+// docs/design/claude-subscription-design.md, locked decision 1).
 package claudebridge
 
 import (

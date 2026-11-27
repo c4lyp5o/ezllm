@@ -13,7 +13,7 @@ import path from 'node:path';
 
 const BASE = process.env.EZLLM_BASE ?? 'http://127.0.0.1:20199';
 const PASS = process.env.RIG_PASS;
-const SHOTS = process.env.SHOTS_DIR ?? `${process.env.HOME}/.hermes/cache/scratch/ezllm-verify/shots`;
+const SHOTS = process.env.SHOTS_DIR ?? `shots`;
 const ROUTES = ['/', '/stats', '/economics', '/requests', '/providers', '/services',
   '/chat', '/combos', '/rules', '/compression', '/connect', '/neighbourhood', '/settings'];
 

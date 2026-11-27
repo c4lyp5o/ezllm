@@ -67,7 +67,7 @@ func TestRunStreamsDeltasAndUsage(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "must-not-leak")
 	r := &Runner{Bin: bin, Home: "/agy-sub", Timeout: 10 * time.Second}
 	var deltas []string
-	res, err := r.Run(context.Background(), Request{Model: "gemini-3.8-flash-low", Effort: "low", Prompt: "say pong"},
+	res, err := r.Run(context.Background(), Request{Model: "gemini-3.8-flash-low", Prompt: "say pong"},
 		func(s string) error { deltas = append(deltas, s); return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestRunStreamsDeltasAndUsage(t *testing.T) {
 	}
 
 	argv := read(t, dir+"/argv")
-	for _, want := range []string{"--print=\n", "stream-json", "--disable-slash-commands", "--model\ngemini-3.8-flash-low", "--effort\nlow"} {
+	for _, want := range []string{"--print=\n", "stream-json", "--disable-slash-commands", "--model\ngemini-3.8-flash-low"} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("argv lacks %q:\n%s", want, argv)
 		}
@@ -154,7 +154,7 @@ func TestMapError(t *testing.T) {
 }
 
 func TestParseRequestBuildsTranscript(t *testing.T) {
-	req, err := parseRequest([]byte(`{"model":"m","reasoning_effort":"minimal","messages":[
+	req, err := parseRequest([]byte(`{"model":"m","messages":[
 		{"role":"system","content":"Be terse."},
 		{"role":"user","content":"hi"},
 		{"role":"assistant","content":[{"type":"text","text":"hello"}]},
@@ -163,12 +163,41 @@ func TestParseRequestBuildsTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "<instructions>\nBe terse.\n</instructions>\n\nEarlier turns of this conversation, oldest first:\n\n<turn role=\"user\">\nhi\n</turn>\n<turn role=\"assistant\">\nhello\n</turn>\n\nReply to the latest user message:\n\nagain"
-	if req.Prompt != want || req.Effort != "low" {
-		t.Fatalf("prompt %q effort %q", req.Prompt, req.Effort)
+	if req.Prompt != want {
+		t.Fatalf("prompt %q", req.Prompt)
 	}
 	lone, _ := parseRequest([]byte(`{"model":"m","messages":[{"role":"user","content":"just this"}]}`), false)
 	if lone.Prompt != "just this" {
 		t.Fatalf("a lone message is reframed: %q", lone.Prompt)
+	}
+}
+
+// Every listed model fixes its own reasoning level, and the CLI refuses the turn
+// when --effort names another one (measured, 1.5.13: "--model
+// gemini-4-hydrogen-medium conflicts with --effort=high"). The client's level must
+// reach neither the CLI nor the conversation cache key.
+func TestClientReasoningEffortIsIgnored(t *testing.T) {
+	const text = `"messages":[{"role":"user","content":"x"}]`
+	const tools = text + `,"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]`
+	for name, body := range map[string]string{"text": text, "tools": tools} {
+		base, err := parseRequest([]byte(`{"model":"gemini-4-hydrogen-medium",`+body+`}`), true)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+			req, err := parseRequest([]byte(`{"model":"gemini-4-hydrogen-medium","reasoning_effort":"`+effort+`",`+body+`}`), true)
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, effort, err)
+			}
+			got := argv(req)
+			if strings.Join(got, "\n") != strings.Join(argv(base), "\n") || strings.Contains(strings.Join(got, "\n"), "--effort") {
+				t.Errorf("%s %s: argv %q", name, effort, got)
+			}
+			a, b := cacheState(base), cacheState(req)
+			if (name == "tools") != (a != nil && b != nil) || (a != nil && a.key != b.key) {
+				t.Errorf("%s %s: the level splits the conversation cache", name, effort)
+			}
+		}
 	}
 }
 
@@ -213,7 +242,7 @@ func (f *fakeExec) Run(_ context.Context, req Request, delta func(string) error)
 }
 
 func newTestServer(ex Executor) *httptest.Server {
-	s := &Server{Runner: ex, Token: "tok", Version: "test", Models: ParseModels(measuredModels),
+	s := &Server{Runner: ex, Token: "tok", Version: "test", Models: ParseModels(measuredModels), CallerTools: true,
 		Now: func() time.Time { return time.Unix(1700000000, 0) }}
 	return httptest.NewServer(s.Handler())
 }

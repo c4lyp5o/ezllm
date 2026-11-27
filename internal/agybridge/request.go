@@ -9,12 +9,11 @@ import (
 // Request is one OpenAI Chat Completions call, reduced to what one headless
 // `agy -p` turn takes: a single prompt. agy has no system-prompt flag and no
 // history replay, so system text and prior turns travel inside the prompt as a
-// deterministic transcript (docs/antigravity-subscription-design.md §3).
+// deterministic transcript (docs/design/antigravity-subscription-design.md §3).
 type Request struct {
 	Model             string
 	Stream            bool
 	IncludeUsage      bool
-	Effort            string
 	Prompt            string
 	Adapter           *toolAdapter
 	cacheWork         string
@@ -29,18 +28,20 @@ type Unsupported struct {
 
 func (u Unsupported) Error() string { return "agy-bridge: " + u.Msg }
 
+// reasoning_effort is deliberately not read. Every model the CLI lists fixes its
+// own level (…-low, …-high, or none), and the CLI refuses the turn when --effort
+// names another one (measured, 1.5.13 and 1.5.16), so the chosen model decides.
 type chatRequest struct {
-	Model           string          `json:"model"`
-	Messages        []chatMessage   `json:"messages"`
-	Stream          bool            `json:"stream"`
-	StreamOptions   *streamOptions  `json:"stream_options"`
-	ReasoningEffort string          `json:"reasoning_effort"`
-	N               *int            `json:"n"`
-	Tools           json.RawMessage `json:"tools"`
-	ToolChoice      json.RawMessage `json:"tool_choice"`
-	ParallelTools   *bool           `json:"parallel_tool_calls"`
-	Functions       json.RawMessage `json:"functions"`
-	ResponseFormat  *struct {
+	Model          string          `json:"model"`
+	Messages       []chatMessage   `json:"messages"`
+	Stream         bool            `json:"stream"`
+	StreamOptions  *streamOptions  `json:"stream_options"`
+	N              *int            `json:"n"`
+	Tools          json.RawMessage `json:"tools"`
+	ToolChoice     json.RawMessage `json:"tool_choice"`
+	ParallelTools  *bool           `json:"parallel_tool_calls"`
+	Functions      json.RawMessage `json:"functions"`
+	ResponseFormat *struct {
 		Type string `json:"type"`
 	} `json:"response_format"`
 }
@@ -67,9 +68,9 @@ func present(raw json.RawMessage) bool {
 	return s != "" && s != "null" && s != "[]"
 }
 
-// parseRequest validates a chat body. Without enableTools it is the default
-// text-only surface; the HTTP server may opt into the experimental
-// structured-output adapter. Images and unsupported tool shapes are refused
+// parseRequest validates a chat body. With enableTools (the default wherever the
+// CLI supports --json-schema) client tools go through the structured-output
+// adapter; without it the surface is text-only. Images and unsupported tool shapes are refused
 // rather than dropped.
 func parseRequest(body []byte, enableTools bool) (Request, error) {
 	var cr chatRequest
@@ -96,7 +97,7 @@ func parseRequest(body []byte, enableTools bool) (Request, error) {
 		return Request{}, Unsupported{Code: "invalid_request", Msg: "messages must not be empty"}
 	}
 
-	req := Request{Model: cr.Model, Stream: cr.Stream, Effort: normalizeEffort(cr.ReasoningEffort)}
+	req := Request{Model: cr.Model, Stream: cr.Stream}
 	if cr.StreamOptions != nil {
 		req.IncludeUsage = cr.StreamOptions.IncludeUsage
 	}
@@ -160,16 +161,6 @@ func buildPrompt(system []string, turns []chatMessage) string {
 	}
 	b.WriteString(latest)
 	return b.String()
-}
-
-// normalizeEffort maps OpenAI's effort words onto agy's --effort values
-// (low|medium|high|xhigh|max); the model decides what it accepts.
-func normalizeEffort(e string) string {
-	switch e = strings.ToLower(strings.TrimSpace(e)); e {
-	case "minimal", "none":
-		return "low"
-	}
-	return e
 }
 
 func contentText(raw json.RawMessage) (string, error) {

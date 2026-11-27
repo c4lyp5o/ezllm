@@ -9,7 +9,7 @@ import (
 )
 
 // A hop that commits a 200 and then dies mid-body looks healthy everywhere but
-// the stream-outcome rollup (docs/hop-health-design.md). The dashboard shows
+// the stream-outcome rollup (docs/design/hop-health-design.md). The dashboard shows
 // it; this raises the bell for it, so a flaky hop is noticed without opening
 // the dashboard. The thresholds are the ones the dashboard's attention item
 // uses: more than 1% truncation across at least 20 judged streams.

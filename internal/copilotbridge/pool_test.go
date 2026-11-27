@@ -71,11 +71,18 @@ func TestPoolCLIHelper(t *testing.T) {
 			if mode == "reused-id" {
 				sid = fmt.Sprintf("s%d", os.Getpid())
 			}
+			params := req.Params
+			rawDefs := params["tools"]
+			if channelProtocolVersion >= 4 { // grouped under tools
+				params = nil
+				json.Unmarshal(rawDefs, &params)
+				rawDefs = params["definitions"]
+			}
 			var defs []any
-			json.Unmarshal(req.Params["tools"], &defs)
+			json.Unmarshal(rawDefs, &defs)
 			tools = len(defs)
 			var allowed []any
-			if json.Unmarshal(req.Params["availableTools"], &allowed) != nil || len(allowed) != tools {
+			if json.Unmarshal(params["availableTools"], &allowed) != nil || len(allowed) != tools {
 				os.Exit(4)
 			}
 			reply(map[string]any{"sessionId": sid})

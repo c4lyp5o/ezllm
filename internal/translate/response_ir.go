@@ -75,7 +75,7 @@ const (
 
 // UsageConventionOf maps the stored per-account fact onto the codec
 // primitive. 'auto' (or unset) reads as exclusive: that is what auto has
-// always meant to the ledger (docs/usage-convention-design.md D1), and real
+// always meant to the ledger (docs/design/usage-convention-design.md D1), and real
 // Anthropic accounts are exclusive. A mis-set inclusive account over-reports
 // input on the client's usage exactly as it already does in the ledger; the
 // NormalizeMessagesUsage guard keeps the opposite mistake from going

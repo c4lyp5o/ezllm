@@ -21,7 +21,7 @@ import (
 // them off, the M0 sentinel ("create a file, touch a marker, curl a URL",
 // default instructions) produced no model-driven execve under strace; with
 // them on, Codex ran all three inside its own sandbox
-// (docs/codex-subscription-design.md §2.5). in_app_updates keeps the pinned
+// (docs/design/codex-subscription-design.md §2.5). in_app_updates keeps the pinned
 // binary pinned.
 var LockdownFeatures = []string{
 	"shell_tool", "unified_exec", "unified_exec_tty", "shell_snapshot",
@@ -676,7 +676,7 @@ func (r *Runner) Run(ctx context.Context, req Request, sink func(Delta) error) (
 	})
 	var ne *NativeError
 	if err != nil && !emitted && len(req.Tools) == 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Code == "native_closed" && ne.BeforeInference {
-		r.logf("codex-bridge: app-server failed before inference, retrying on exec", "err", ne.Message)
+		r.logf("codex-bridge: app-server failed before inference, retrying on exec: %s", ne.Message)
 		return r.runExec(ctx, req, sink)
 	}
 	return res, err

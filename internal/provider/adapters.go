@@ -149,7 +149,7 @@ func (a *openCodeGo) ReadQuota(ctx context.Context, acct Account, key string) (Q
 
 // ─────────────────────────────────────────────────────────────────────────────
 // openai-compatible — any /v1 server speaking OpenAI chat completions
-// (covers ssn-gpt = space.stationine.com, ollama-cloud, etc.)
+// (covers initech-gpt = api.example.com, ollama-cloud, etc.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type openAICompatible struct{ client *http.Client }
@@ -235,7 +235,7 @@ func isCommandCode(acct Account) bool {
 	return err == nil && strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "api.commandcode.ai")
 }
 
-// AuthOracle: GET /usage — verified live on ssn-gpt: 401 INVALID_API_KEY on a
+// AuthOracle: GET /usage — verified live on initech-gpt: 401 INVALID_API_KEY on a
 // bad key, 401 API_KEY_REQUIRED with no header, 200 on a good one. Costs zero
 // tokens. Some OpenAI-shaped gateways lack /usage entirely; registration treats
 // a 404 here as "no oracle" and falls back to the inference step as the auth
@@ -263,7 +263,7 @@ func (a *openAICompatible) AuthOracleFor(acct Account) AuthProbe {
 	return a.AuthOracle()
 }
 
-// CatalogIsPublic: false on ssn-gpt (bad key → 401 INVALID_API_KEY), which is
+// CatalogIsPublic: false on initech-gpt (bad key → 401 INVALID_API_KEY), which is
 // the common case for OpenAI-shaped gateways. Registration still records the
 // catalog as informational and gates on the oracle, so a provider that flips
 // to a public catalog can't cause a false pass.
@@ -295,10 +295,10 @@ func mapUsageErr(err error) error {
 }
 
 // ReadQuota classifies whatever shape the gateway exposes. Verified against
-// ssn-gpt (space.stationine.com): balance/remaining in USD plus usage.today and
+// initech-gpt (api.example.com): balance/remaining in USD plus usage.today and
 // usage.total cost fields. Host-scoped oracles (DeepSeek/OpenRouter/Vercel/
 // Ollama) run first — providers whose balance lives outside {base}/usage but
-// on the SAME key (docs/quota-oracles-design.md); their endpoints were
+// on the SAME key (docs/design/quota-oracles-design.md); their endpoints were
 // live-probed 2026-10-14. Providers with no quota endpoint yield
 // ErrQuotaUnsupported, which the UI renders as "measured" (our own numbers).
 func (a *openAICompatible) ReadQuota(ctx context.Context, acct Account, key string) (Quota, error) {

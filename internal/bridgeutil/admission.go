@@ -142,7 +142,11 @@ func Authorized(r *http.Request, token string, allowXAPIKey bool) bool {
 		got = r.Header.Get("x-api-key")
 	}
 	if got == "" {
-		got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		// The scheme is case-insensitive (RFC 9110); a bare token without it
+		// is not a Bearer credential.
+		if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "Bearer ") {
+			got = strings.TrimSpace(h[7:])
+		}
 	}
 	return token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }

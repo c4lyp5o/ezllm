@@ -1,4 +1,4 @@
-// Dashboard check for the hop stream-health card (docs/hop-health-design.md).
+// Dashboard check for the hop stream-health card (docs/design/hop-health-design.md).
 // Asserts the card renders the server's numbers, the attention item fires for a
 // hop over 1%, and the page still has no mobile overflow.
 //
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 
 const BASE = process.env.EZLLM_BASE ?? 'http://127.0.0.1:20199';
 const PASS = process.env.RIG_PASS;
-const SHOTS = process.env.SHOTS_DIR ?? `${process.env.HOME}/.hermes/cache/scratch/ezllm-verify/shots`;
+const SHOTS = process.env.SHOTS_DIR ?? `shots`;
 if (!PASS) { console.error('RIG_PASS required'); process.exit(2); }
 fs.mkdirSync(SHOTS, { recursive: true });
 

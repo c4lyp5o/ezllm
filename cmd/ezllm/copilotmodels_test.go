@@ -1,7 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"io/fs"
+	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,7 +64,10 @@ func TestParseHelpConfigAgainstTheRealCLI(t *testing.T) {
 	if err != nil {
 		t.Skip("copilot CLI not installed")
 	}
-	live := copilotLiveModels(bin)
+	live, err := copilotLiveModels(bin)
+	if err != nil {
+		t.Fatalf("Copilot CLI at %q could not read its help page: %v", bin, err)
+	}
 	if len(live) < 10 {
 		t.Fatalf("parsed %d ids from the real `help config` (%v): the page changed shape", len(live), live)
 	}
@@ -67,5 +75,39 @@ func TestParseHelpConfigAgainstTheRealCLI(t *testing.T) {
 		if id == "default" || id == "long_context" {
 			t.Errorf("context-tier value %q leaked into the model list", id)
 		}
+	}
+}
+
+func TestCopilotLiveModelsReportsLaunchFailure(t *testing.T) {
+	models, err := copilotLiveModels(filepath.Join(t.TempDir(), "missing-copilot"))
+	if err == nil || len(models) != 0 {
+		t.Fatalf("want launch error and no models, got %v, %v", models, err)
+	}
+}
+
+// A first-time operator sees only this line: it must say how to get unstuck.
+func TestMissingBridgeCLINamesTheFix(t *testing.T) {
+	for _, tc := range []struct {
+		name, sw, bin string
+		start         func(context.Context, *slog.Logger, bridgeReport, string) (func(), error)
+	}{
+		{"claude", envBridge, envBridgeBin, startClaudeBridge},
+		{"codex", envCodexBridge, envCodexBin, startCodexBridge},
+		{"agy", envAgyBridge, envAgyBin, startAgyBridge},
+		{"copilot", envCopilotBridge, envCopilotBin, startCopilotBridge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.sw, "on")
+			t.Setenv(tc.bin, filepath.Join(t.TempDir(), "current", tc.name))
+			_, err := tc.start(t.Context(), slog.Default(), nil, t.TempDir())
+			if !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("want the missing file as the cause, got %v", err)
+			}
+			for _, want := range []string{"docs/bridge-setup.md", tc.sw + "=off"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not mention %q: %v", want, err)
+				}
+			}
+		})
 	}
 }

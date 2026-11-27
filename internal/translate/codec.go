@@ -5,6 +5,7 @@ package translate
 // decoders cannot drift on what "ignore" and "refuse" mean.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -62,7 +63,25 @@ func topKeys(body []byte) (map[string]json.RawMessage, error) {
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, fmt.Errorf("unmarshal request: %w", err)
 	}
+	if top == nil {
+		return nil, fmt.Errorf("unmarshal request: expected a JSON object")
+	}
+	// A field set to null is a field left out. SDKs send unset options as
+	// null ("max_tokens": null, "temperature": null, "tool_choice": null);
+	// read as values they became 0, false or an empty tool choice, and
+	// tool_choice: null failed the request.
+	for k, v := range top {
+		if isJSONNull(v) {
+			delete(top, k)
+		}
+	}
 	return top, nil
+}
+
+// isJSONNull reports a missing value or a JSON null.
+func isJSONNull(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) == 0 || string(t) == "null"
 }
 
 // classify refuses the named keys with their own reason. Every other key
@@ -125,7 +144,7 @@ func partsCacheControl(raw json.RawMessage) string {
 // intFromRaw returns a present integer (presence is preserved, so an explicit
 // 0 is not "absent").
 func intFromRaw(raw json.RawMessage) (*int, bool, error) {
-	if len(raw) == 0 {
+	if isJSONNull(raw) {
 		return nil, false, nil
 	}
 	var v int
@@ -136,7 +155,7 @@ func intFromRaw(raw json.RawMessage) (*int, bool, error) {
 }
 
 func floatFromRaw(raw json.RawMessage) (*float64, error) {
-	if len(raw) == 0 {
+	if isJSONNull(raw) {
 		return nil, nil
 	}
 	var v float64
@@ -147,7 +166,7 @@ func floatFromRaw(raw json.RawMessage) (*float64, error) {
 }
 
 func boolFromRaw(raw json.RawMessage) (*bool, error) {
-	if len(raw) == 0 {
+	if isJSONNull(raw) {
 		return nil, nil
 	}
 	var v bool
@@ -158,7 +177,7 @@ func boolFromRaw(raw json.RawMessage) (*bool, error) {
 }
 
 func stringFromRaw(raw json.RawMessage) (string, error) {
-	if len(raw) == 0 {
+	if isJSONNull(raw) {
 		return "", nil
 	}
 	var v string
@@ -171,7 +190,7 @@ func stringFromRaw(raw json.RawMessage) (string, error) {
 // stopFromRaw reads the stop sequences, which the chat wire allows as either a
 // bare string or an array.
 func stopFromRaw(raw json.RawMessage) ([]string, error) {
-	if len(raw) == 0 {
+	if isJSONNull(raw) {
 		return nil, nil
 	}
 	var one string
@@ -255,4 +274,17 @@ func marshalObjectArgs(input any) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// markToolError keeps Anthropic's tool_result is_error flag, which the chat and
+// Responses wires have no field for. Dropped, a failed command with no output
+// read as a success with empty output.
+func markToolError(text string, isError bool) string {
+	if !isError {
+		return text
+	}
+	if text == "" {
+		return "[tool error]"
+	}
+	return "[tool error] " + text
 }

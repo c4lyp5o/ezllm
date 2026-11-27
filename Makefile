@@ -1,5 +1,9 @@
 GO  ?= go
 BIN := bin/ezllm
+# Dashboard doc links point at the docs of the commit being built, as the
+# Docker image's DOCS_REF does; master when git is not available.
+DOCS_REF ?= $(shell git rev-parse HEAD 2>/dev/null || echo master)
+LDFLAGS := -s -w -X github.com/c4lyp5o/ezllm/internal/server.DocsRef=$(DOCS_REF)
 
 # Local test runs carry CI's memory envelope (.github/workflows/test.yml):
 # GOMEMLIMIT/GOGC keep the Go heap in the same budget the runner uses.
@@ -17,7 +21,7 @@ test test-race bench perf: export GOGC := 50
 # Measured 2026-10-26: 26.6 MB plain vs 18.5 MB with these flags. CGO_ENABLED=0
 # works because modernc.org/sqlite is pure Go; mattn/go-sqlite3 would break it.
 build:
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN) ./cmd/ezllm
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/ezllm
 
 # Symbols kept (`go tool nm`, debuggers). Nothing ships from this target.
 build-debug:
@@ -25,7 +29,7 @@ build-debug:
 
 # Same flags as `build`, plus the static-link check the Docker image relies on.
 static:
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN) ./cmd/ezllm
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/ezllm
 	@file $(BIN) | grep -q "statically linked" && echo "✓ statically linked" || echo "✗ NOT static"
 
 run:
@@ -76,7 +80,7 @@ check:
 verify:
 	$(GO) run ./cmd/m2verify
 
-# Phase-separated benchmarks (see docs/perf-baseline-m1.md). Every one runs
+# Phase-separated benchmarks (see docs/design/perf-baseline-m1.md). Every one runs
 # with -benchmem; -run XXX keeps the tests out of the run.
 bench:
 	$(GO) test ./internal/proxy/... ./internal/server/... -run XXX -bench . -benchmem -count=1

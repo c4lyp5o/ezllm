@@ -19,25 +19,25 @@ request_limits:
 # an example here to bootstrap one. An empty map is valid.
 providers:
   # ── OpenCode Go ────────────────────────────────────────────────────────────
-  # Clients address it as "<namespace>/<model>", e.g. opengo/qwen3.8-flash.
+  # Clients address it as "<namespace>/<model>", e.g. opencode/qwen3.8-flash.
   # REQUIRES x-opencode-session (defaults on for kind: opencode-go); a missing
   # header yields 400 MissingSessionID upstream. Serves all three surfaces, but
   # per-model: /v1/messages 400s ModelProtocolUnsupported on some models
   # (glm-5.2, omen-alpha, kimi-k2.6) while qwen/deepseek/minimax work.
-  # opencode-main:
-  #   namespace: opengo
+  # opencode:
+  #   namespace: opencode
   #   kind: opencode-go
   #   base_url: https://opencode.ai/zen/go/v1
 
-  # ── Generic OpenAI-compatible (ssn-gpt = space.stationine.com) ─────────────
-  # Its GET /v1/usage reports a MONEY shape (balance/remaining in USD plus
+  # ── Generic OpenAI-compatible ──────────────────────────────────────────────
+  # Some report a MONEY shape on GET /v1/usage (balance/remaining in USD plus
   # usage.today / usage.total cost), which the dashboard renders as a balance
   # card rather than percentage bars.
-  # ssn-gpt:
-  #   namespace: super-ssn
+  # acme:
+  #   namespace: acme
   #   kind: openai-compatible
-  #   base_url: https://space.stationine.com/v1
-  #   # This host sits behind Cloudflare: probing too fast returns 403 "error
+  #   base_url: https://api.example.com/v1
+  #   # A host behind Cloudflare can answer a fast probe with 403 "error
   #   # code: 1010", which would make the key test FAIL ON A PERFECTLY GOOD KEY.
   #   # Keep probe_delay_ms >= 400.
   #   probe_delay_ms: 500

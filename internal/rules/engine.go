@@ -63,6 +63,9 @@ type Engine struct {
 	now   Clock
 
 	rules atomic.Value // map[key]*Rule, immutable once published
+	// loaded is set once a rule set from the store has been published; the
+	// empty set the engine starts with does not count.
+	loaded atomic.Bool
 
 	// refresh interval for the background ticker. Named here so tests can
 	// shrink it; production sets it via newEngine.
@@ -149,6 +152,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 		return fmt.Errorf("rules: reload: %w", err)
 	}
 	m := make(map[key]*Rule, len(list))
+	var bad error
 	for i := range list {
 		r := list[i]
 		if !r.Enabled {
@@ -157,12 +161,27 @@ func (e *Engine) Reload(ctx context.Context) error {
 		// Fail closed on an unresolvable tz rather than installing a rule
 		// that will evaluate its window in the wrong zone.
 		if terr := r.Window.ValidateTZ(); terr != nil {
-			return fmt.Errorf("rules: reload: refusing to install rule for account %d model %q: %w",
-				r.AccountID, r.ModelID, terr)
+			if bad == nil {
+				bad = fmt.Errorf("rules: reload: refusing to install rule for account %d model %q: %w",
+					r.AccountID, r.ModelID, terr)
+			}
+			continue
 		}
 		m[key{r.AccountID, r.ModelID}] = &r
 	}
+	if bad != nil {
+		// Running: keep the last-good set (see above). At the first load
+		// there is none, and refusing would leave EVERY rule off; install
+		// the valid ones and report the bad row instead.
+		if e.loaded.Load() {
+			return bad
+		}
+		e.rules.Store(m)
+		e.loaded.Store(true)
+		return bad
+	}
 	e.rules.Store(m) // atomic publish — readers never see a partial map
+	e.loaded.Store(true)
 	return nil
 }
 
@@ -282,7 +301,7 @@ func (e *Engine) Eligible(ctx context.Context, accountID int64, modelID string) 
 }
 
 // windowDetail renders the window as a sentence for the 429 message,
-// e.g. "allowed 22:00-06:00 Asia/Kuala_Lumpur (Mon-Fri)".
+// e.g. "allowed 22:00-06:00 Europe/Berlin (Mon-Fri)".
 func (r *Rule) windowDetail() string {
 	var b strings.Builder
 	if r.Window.Start != "" && r.Window.End != "" {

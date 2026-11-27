@@ -4,11 +4,14 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +21,7 @@ import (
 // DefaultListen is loopback-only unless overridden with -addr.
 const DefaultListen = "127.0.0.1:20129"
 
-// DefaultDataDir is repo-relative so Docker can bind-mount ./data (Calypso #5).
+// DefaultDataDir is repo-relative so Docker can bind-mount ./data.
 const DefaultDataDir = "data"
 
 // namespaceRE constrains account namespaces: lowercase alnum plus _ and -,
@@ -111,7 +114,7 @@ type Translation struct {
 	//
 	// Each entry is a REGEX matched FULLY against "<namespace>/<model_id>"
 	// (both ends anchored), so a plain id matches only itself and a family
-	// pattern like `stationine/gpt-6\.1-sol` covers its variants. Compile
+	// pattern like `globex/gpt-6\.1-sol` covers its variants. Compile
 	// errors are a boot failure naming the entry. Empty list (default) = the
 	// wire override is inert. This list is its own opt-in; translation.enabled
 	// gates the separate anthropic→chat leg.
@@ -221,6 +224,7 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	walk("", tree)
+	cfg.Warnings = append(cfg.Warnings, unknownKeys(raw)...)
 	if universalKeySet(raw) {
 		cfg.Warnings = append(cfg.Warnings,
 			"translation.universal_enabled is deprecated: translation.enabled is the one switch now")
@@ -277,8 +281,10 @@ func (c *Config) Validate() error {
 	// --- listen ---
 	if c.Listen == "" {
 		c.Listen = DefaultListen
-	} else if !strings.Contains(c.Listen, ":") || strings.HasSuffix(c.Listen, ":") {
+	} else if _, port, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, fmt.Sprintf("listen: %q must be host:port", c.Listen))
+	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		errs = append(errs, fmt.Sprintf("listen: %q needs a port from 1 to 65535", c.Listen))
 	}
 
 	// --- data dir / master key ---
@@ -503,3 +509,25 @@ func contains(list []string, v string) bool {
 
 // ErrNoProviders is returned by helpers that require at least one provider.
 var ErrNoProviders = errors.New("config: no providers configured")
+
+// unknownKeys names config.yaml keys ezllm does not read, as warnings: a typo
+// such as request_limit: used to be ignored without a word, leaving the
+// default in force. A warning, not an error, so an existing file keeps
+// starting.
+func unknownKeys(raw []byte) []string {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	var probe Config
+	err := dec.Decode(&probe)
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return nil
+	}
+	var out []string
+	for _, e := range te.Errors {
+		if strings.Contains(e, "not found in type") {
+			out = append(out, "config.yaml: unknown key, ignored: "+e)
+		}
+	}
+	return out
+}

@@ -1,4 +1,5 @@
-import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics, type BridgeAdmission } from '../utils/api';
+import { UpdateArrow } from '../ez/UpdateArrow';
+import { getSettings, saveSettings, getDashboardSessions, revokeDashboardSession, revokeAllDashboardSessions, getBackupStatus, runBackup, getDiagnostics, getUpdate, type SettingsView, type DashboardSession, type BackupStatus, type SystemDiagnostics, type UpdateStatus, type BridgeAdmission } from '../utils/api';
 import { readTheme, setTheme } from '../utils/theme';
 import { readMotion, readRange, savePreference, subscribePreferences } from '../utils/preferences';
 import { useEffect, useRef, useState } from 'react';
@@ -7,7 +8,8 @@ import { ApiError, changeDashboardPassword, clearToken } from '../utils/api';
 import { Chip, ConfirmModal, CopyButton, SectionLabel, btn, cx, inputCls, relTime } from '../components/ui';
 import { bridgeUpdateText, fmtUptime, UPDATE_TONE } from '../utils/lib';
 import PushChannels from '../components/PushChannels';
-import { settingError } from '../utils/settings';
+import ImportConfig from '../components/ImportConfig';
+import { effectiveText, settingError } from '../utils/settings';
 import PasswordStrength from '../components/PasswordStrength';
 import { MIN_PASSWORD } from '../utils/passwordStrength';
 
@@ -56,13 +58,13 @@ function PasswordSettings() {
             <input className={cx(inputCls, 'mt-1.5')} type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={MIN_PASSWORD} required />
           </label>
           {error && <p className="text-sm text-bad" role="alert">{error}</p>}
-          {saved && <p className="text-sm text-good" role="status">Password updated. Signing out this session…</p>}
+          {saved && <p className="text-sm text-ok" role="status">Password updated. Signing out this session…</p>}
           <button disabled={busy} className={cx(btn.base, btn.primary)} type="submit">{busy ? 'Saving…' : 'Change password'}</button>
         </form>
       </section>
       <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn-dim p-4">
         <Chip tone="warn">Security</Chip>
-        <p className="text-xs leading-relaxed text-mute">This password protects your provider keys and API keys, and there's no second factor. Make it long and unique, aiming for Good or Strong on the bar, especially if the dashboard can be reached from outside your own network.</p>
+        <p className="text-xs leading-relaxed text-mute">This password protects your provider keys and app keys, and there's no second factor. Make it long and unique, aiming for Good or Strong on the bar, especially if the dashboard can be reached from outside your own network.</p>
       </div>
     </div>
   );
@@ -74,37 +76,47 @@ const TABS: Tab[] = ['General', 'Security', 'Backup & Recovery', 'Gateway', 'Not
 const TAB_SLUG: Record<Tab, string> = { General: 'general', Security: 'security', 'Backup & Recovery': 'backup', Gateway: 'gateway', Notifications: 'notifications', System: 'system' };
 const tabFromSlug = (slug: string | null): Tab => TABS.find((t) => TAB_SLUG[t] === slug) ?? 'General';
 const DETAILS: Record<string, [string, string]> = {
-  usage_timezone: ['Usage timezone', 'An IANA name, for example Asia/Kuala_Lumpur. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
-  translation_enabled: ['Protocol translation', 'Let requests go to a model on a different API when testing showed it works. Pins still apply.'],
-  automatic_probing: ['Automatic probing', 'Test new combo hops and newly found free models automatically.'],
+  usage_timezone: ['Usage timezone', 'An IANA name, for example Europe/Berlin. Reports, and rules set to "Instance timezone", use this. Rules with their own timezone keep it.'],
+  translation_enabled: ['API conversion', 'Let requests go to a model on a different API when testing showed it works. Forced APIs still apply.'],
+  automatic_probing: ['Automatic testing', 'Test new combo models and newly found free models automatically.'],
   catalog_interval: ['Catalog refresh interval', 'Duration of at least 1m, for example 12h.'],
+  update_check: ['Check for new ezllm releases', 'Ask GitHub once a day for the latest release and say when there is a newer one. Nothing is sent about this instance and nothing is installed.'],
   price_refresh: ['Automatic price refresh', 'Refresh after startup and daily at 03:00 in the instance timezone.'],
-  retries: ['Retries per hop', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
+  retries: ['Retries per model', 'How many times to retry a temporary failure on the same provider, from 0 to 9. Set 0 to turn retries off.'],
   attempt_budget: ['Total request attempt budget', 'Total attempts across all providers and retries, from 0 to 64. Set 0 for no limit.'],
   dispatch_deadline: ['Dispatch deadline', 'At least 1s, or leave empty for no limit. This limits the time spent picking a provider and waiting to retry. Streams already running aren\'t cut off.'],
-  cooldown_429: ['Rate-limit cooldown', 'How long to wait when a provider doesn\'t send Retry-After.'],
-  cooldown_5xx: ['Server-error cooldown', 'Duration before a failed endpoint is eligible again.'],
-  cooldown_strikes: ['Failures before cooldown', 'Number of failures, 1 or more. Cooldowns already running keep their end times.'],
+  cooldown_429: ['Rate-limit pause', 'How long to wait when a provider doesn\'t send Retry-After.'],
+  cooldown_5xx: ['Server-error pause', 'How long a model that failed is paused before it gets traffic again.'],
+  gemini_query_key: ['Accept keys in the URL (Gemini ?key=)', 'Off by default. Google\'s API lets a client put its key in the address (?key=…). Leave this off unless a client cannot send the x-goog-api-key header.'],
+  cooldown_strikes: ['Failures before a pause', 'Number of failures, 1 or more. Pauses already running keep their end times.'],
   backup_enabled: ['Scheduled backups', 'Needs a backup folder mounted on the host and a separate encryption secret.'],
   backup_hour: ['Daily backup hour', 'Hour of the day, from 0 to 23, in the instance timezone.'],
   backup_keep: ['Verified backups to keep', 'From 1 to 365. Old backups are only deleted after a new one has been checked.'],
+  ledger_retention_days: ['Keep every call for', 'Days, 0 to keep everything, or 32 to 3650. Older calls are added into daily totals per provider, model, key and app, then deleted, so charts and costs stay the same. Requests then shows only the calls kept.'],
   notify_free_models_added: ['Free models added', 'New free models discovered in a provider catalog.'],
   notify_free_models_removed: ['Free models removed', 'Free models removed from a provider catalog.'],
-  notify_free_model_broken: ['Broken free models', 'Free models that fail every protocol probe.'],
+  notify_free_model_broken: ['Broken free models', 'Free models that fail the test on every API.'],
   notify_catalog_refresh_failed: ['Catalog refresh failures', 'A provider catalog could not be refreshed.'],
-  notify_client_budget_reached: ['Client budget reached', 'A client token has exhausted its budget.'],
+  notify_client_budget_reached: ['App key budget reached', 'An app key has used up its budget.'],
   notify_price_refresh_failed: ['Price refresh failures', 'The price catalog could not be refreshed.'],
   notify_backup_failed: ['Backup failures', 'A backup did not complete or verification failed.'],
   notify_bridge_updated: ['Bridge CLI updated', 'The bridge updater installed a new CLI version and it passed its checks.'],
   notify_bridge_update_blocked: ['Bridge CLI release held back', 'A new CLI version failed its checks, so the bridge kept the current one.'],
   notify_bridge_rolled_back: ['Bridge CLI rolled back', 'A new CLI version failed after it was installed, so the bridge went back to the previous one.'],
   notify_stream_truncation: ['Answers cut mid-stream', 'A provider cut off more than 1% of its streamed answers in the last 24 hours (out of at least 20).'],
+  notify_update_available: ['New ezllm release', 'A newer ezllm release is available.'],
+  notify_quota_warning: ['Quota nearly used', 'A provider has used most of a quota window. ezllm reads each provider\'s quota once an hour and warns once per window.'],
+  alert_quota_percent: ['Warn at this much of a quota', 'Percent, from 1 to 100.'],
+  notify_balance_low: ['Balance running low', 'A prepaid provider balance is below the amount here. Said once each time it drops below; a top-up re-arms it.'],
+  alert_balance_below: ['Warn below this balance', 'In the provider\'s own currency, for example 2.'],
+  notify_cookie_expiring: ['Session cookie expiring', 'A pasted session cookie, used to read quota, expires soon.'],
+  alert_cookie_hours: ['Warn this many hours ahead', 'From 1 to 720.'],
 };
 const GROUPS: Partial<Record<Tab, string[]>> = {
-  General: ['usage_timezone'],
-  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes'],
-  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep'],
-  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_')),
+  General: ['usage_timezone', 'update_check'],
+  Gateway: ['translation_enabled', 'automatic_probing', 'catalog_interval', 'price_refresh', 'retries', 'attempt_budget', 'dispatch_deadline', 'cooldown_429', 'cooldown_5xx', 'cooldown_strikes', 'gemini_query_key'],
+  'Backup & Recovery': ['backup_enabled', 'backup_hour', 'backup_keep', 'ledger_retention_days'],
+  Notifications: Object.keys(DETAILS).filter(k => k.startsWith('notify_') || k.startsWith('alert_')),
 };
 const panel = 'rounded-xl border border-line bg-surface p-5 sm:p-6';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : 'The operation could not be completed.';
@@ -132,11 +144,13 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [acknowledged, acknowledge] = useState(false);
-  useEffect(() => { setDraft({}); acknowledge(false); }, [view.revision, tab]);
+  const [keyRisk, acceptKeyRisk] = useState(false);
+  useEffect(() => { setDraft({}); acknowledge(false); acceptKeyRisk(false); }, [view.revision, tab]);
   const dirty = Object.keys(draft).length > 0;
   useEffect(() => { onDirty(dirty); return () => onDirty(false); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!keys.length) return null;
   const timezoneChanged = 'usage_timezone' in draft;
+  const queryKeyOn = draft.gemini_query_key === true;
   // A value reset to the deployment default (null) is always acceptable.
   const problems: Record<string, string> = {};
   for (const [k, v] of Object.entries(draft)) { if (v !== null) { const msg = settingError(k, v); if (msg) problems[k] = msg; } }
@@ -168,11 +182,17 @@ function SettingsGroup({ tab, view, updated, onDirty }: { tab: Tab; view: Settin
           {!field.editable && <p className="mt-1 text-xs text-mute">Managed by {field.source}; change the deployment override to unlock this control.</p>}
         </div>;
       })}
+      {queryKeyOn && <div role="alert" className="rounded-xl border-2 border-bad bg-bad-dim p-4 text-sm text-ink">
+        <p className="text-base font-semibold text-bad">Warning: keys in the URL leak.</p>
+        <p className="mt-2">With this on, an ezllm key can be sent as part of the address, like <code>…:generateContent?key=YOUR_KEY</code>. Addresses are written down in many places: reverse-proxy and load-balancer access logs, browser history, monitoring tools and error reports. Anyone who can read those can copy the key and spend your providers' quota.</p>
+        <p className="mt-2">Turn it on only for a client that cannot send the <code>x-goog-api-key</code> header. Give that client its own key with a budget, and keep your proxy's access logs private.</p>
+        <label className="mt-3 flex items-start gap-2 font-medium"><input type="checkbox" checked={keyRisk} onChange={e => acceptKeyRisk(e.target.checked)} />I understand that keys sent in the URL can be read from logs, and I accept the risk.</label>
+      </div>}
       {timezoneChanged && <label className="flex items-start gap-2 text-sm text-warn"><input type="checkbox" checked={acknowledged} onChange={e => acknowledge(e.target.checked)} />I understand this changes where report days and rule windows start and end, and can change today's remaining budgets.</label>}
       {error && <p role="alert" className="text-sm text-bad">{error} Reload Settings if another operator changed it.</p>}
-      {saved && <p role="status" className="text-sm text-good">Settings saved.</p>}
+      {saved && <p role="status" className="text-sm text-ok">Settings saved.</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
+        <button className={cx(btn.base, btn.primary)} disabled={busy || !dirty || (timezoneChanged && !acknowledged) || (queryKeyOn && !keyRisk) || Object.keys(problems).length > 0}>{busy ? 'Saving…' : 'Save changes'}</button>
         {dirty && <button type="button" className={cx(btn.base, btn.ghost)} onClick={() => { setDraft({}); acknowledge(false); setError(''); }}>Discard changes</button>}
         {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
       </div>
@@ -224,13 +244,14 @@ function Backups() {
   }, []);
   const run = async () => { setBusy(true); setError(''); try { await runBackup(); await load(); } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); } };
   return <><section className={panel}><SectionLabel>Exports</SectionLabel><p className="mt-2 text-sm text-mute">An export has your configuration and, if you choose, usage history. It doesn't include provider credentials, so a full restore also needs a database and master key backup.</p><div className="mt-4 flex flex-wrap gap-3"><a className={cx(btn.base, btn.ghost)} href="/admin/export" download>Export configuration</a><a className={cx(btn.base, btn.ghost)} href="/admin/export?include_ledger=true" download>Export with ledger</a></div></section>
+    <ImportConfig panel={panel} />
     <section className={panel}><SectionLabel>Encrypted backups</SectionLabel><p className="mt-2 text-sm text-mute">Each backup has a checked copy of the database and its master key, encrypted with a separate backup secret. Store that secret somewhere else. Set EZLLM_BACKUP_DIR and EZLLM_BACKUP_SECRET_FILE on the host. CLI logins and your deployment files need their own backups.</p>
       <p className="mt-4 text-sm">{status?.running ? 'Backup running…' : status?.ready ? 'Backup storage configured' : 'Backup storage is not configured'}</p>
       {status?.error && <p role="alert" className="mt-2 text-sm text-bad">{status.error}</p>}
       {status?.last_outcome && <p className="mt-1 text-xs text-mute">Last job: {status.last_outcome} {status.last_finished && new Date(status.last_finished).toLocaleString()}</p>}
       <button className={cx(btn.base, btn.primary, 'mt-4')} disabled={!status?.ready || status.running || busy} onClick={() => void run()}>{busy || status?.running ? 'Backing up…' : 'Back up now'}</button>
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
-      <ul className="mt-4 space-y-2">{status?.backups.map(b => <li key={b.id} className="flex flex-wrap justify-between gap-2 text-xs"><span>{new Date(b.created_at).toLocaleString()} · {(b.bytes / 1048576).toFixed(2)} MiB</span><Chip tone="good">Verified</Chip></li>)}</ul>
+      <ul className="mt-4 space-y-2">{status?.backups.map(b => <li key={b.id} className="flex flex-wrap justify-between gap-2 text-xs"><span>{new Date(b.created_at).toLocaleString()} · {(b.bytes / 1048576).toFixed(2)} MiB</span><Chip tone="ok">Verified</Chip></li>)}</ul>
       <p className="mt-5 text-xs text-mute">To restore, stop ezllm and restore into a new folder. Check the backup with <code>ezllm backup-verify --archive BACKUP --secret-file SECRET</code>, then restore with <code>ezllm backup-restore --archive BACKUP --secret-file SECRET --output NEW_DIRECTORY</code>. Restored dashboard sessions are revoked.</p>
     </section></>;
 }
@@ -244,12 +265,21 @@ function BridgeLoad({ a }: { a: BridgeAdmission }) {
     {n(a.in_flight)} of {n(a.max_concurrent)} running · {n(a.queued)} of {n(a.max_queue)} waiting · {n(a.served)} served · {n(refused)} refused because the queue was full
   </p>;
 }
+// Same pill as eziarr's System tab. With the check off it stays a plain link.
+function UpdatePill({ u }: { u: UpdateStatus }) {
+  return <a href={u.url || 'https://github.com/c4lyp5o/ezllm/releases'} target="_blank" rel="noreferrer noopener"
+    title={u.checked_at ? `Checked ${new Date(u.checked_at).toLocaleString()}` : undefined}
+    className={cx('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors', u.available ? 'bg-warn-dim text-warn' : 'text-mute hover:bg-raised hover:text-ink')}>
+    {u.available ? `v${u.latest} available` : u.latest ? 'Up to date' : 'Releases'}<UpdateArrow />
+  </a>;
+}
 function System() {
   const [info, setInfo] = useState<SystemDiagnostics | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { getDiagnostics().then(setInfo).catch(e => setError(errorMessage(e))); }, []);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  useEffect(() => { getDiagnostics().then(setInfo).catch(e => setError(errorMessage(e))); getUpdate().then(setUpdate).catch(() => undefined); }, []);
   return <section className={panel}><SectionLabel>System</SectionLabel>{error && <p role="alert" className="mt-3 text-bad">{error}</p>}{info && <>
-    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" /></dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
+    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm"><dt>Version</dt><dd className="flex min-w-0 flex-wrap items-center gap-2 break-all">{info.version}<CopyButton text={info.version} label="Copy" />{update && <UpdatePill u={update} />}</dd><dt>Uptime</dt><dd title={`${Math.floor(info.uptime_seconds / 60)} minutes`}>{fmtUptime(info.uptime_seconds)}</dd><dt>Database</dt><dd>{(info.database_bytes / 1048576).toFixed(2)} MiB</dd></dl>
     {info.deployment && <dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><dt>Listen address</dt><dd className="break-words">{info.deployment.listen_address} · {info.deployment.listen_source}</dd><dt>Storage</dt><dd>{info.deployment.storage}</dd><dt>Master-key source</dt><dd>{info.deployment.master_key_source}</dd><dt>Trusted proxy entries</dt><dd>{info.deployment.trusted_proxy_count}</dd></dl>}
     <div className="mt-5 space-y-2">{info.bridges.map(b => { const u = b.update && bridgeUpdateText(b.update); return <div key={b.id} className="text-sm"><p className="flex justify-between gap-3"><span>{b.id}</span><span>{b.enabled ? 'Ready' : 'Off'}</span></p>{u && <p className={cx('text-xs', UPDATE_TONE[u.tone])}>CLI updates: {u.text}</p>}{b.admission && <BridgeLoad a={b.admission} />}</div>; })}</div>
     <div className="mt-5 space-y-2">{Object.entries(info.jobs).map(([name, j]) => <div key={name} className="text-sm"><p>{name}: {j.running ? 'Running' : 'Idle'}</p><p className="text-xs text-mute">Last success: {j.last_success ? new Date(j.last_success).toLocaleString() : 'No recorded success'} · last failure: {j.last_failure ? new Date(j.last_failure).toLocaleString() : 'None recorded'}</p></div>)}</div>
@@ -286,7 +316,7 @@ export default function Settings() {
     {tab === 'Security' && <><PasswordSettings /><Sessions /></>}
     {tab === 'Backup & Recovery' && <Backups />}
     {tab === 'Notifications' && <><p className="text-xs text-mute">These apply to new notifications in the bell and your push channels. Past notifications stay.</p><PushChannels /></>}
-    {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{String(f.value) || 'Unlimited'}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
+    {tab === 'System' && <><System />{view && <section className={panel}><SectionLabel>Effective configuration</SectionLabel><div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="py-2">Setting</th><th>Effective value</th><th>Source</th></tr></thead><tbody>{Object.entries(view.fields).map(([k, f]) => <tr key={k} className="border-t border-line"><td className="py-2 pr-3">{DETAILS[k]?.[0] ?? k}</td><td className="pr-3">{effectiveText(k, f.value)}</td><td>{f.source}</td></tr>)}</tbody></table></div></section>}</>}
     <ConfirmModal open={pendingTab != null} tone="primary" confirmLabel="Discard changes" title="Discard unsaved changes?"
       body="You have unsaved changes on this tab. They'll be lost if you leave."
       onClose={() => setPendingTab(null)} onConfirm={() => { if (pendingTab) goTab(pendingTab); }} />

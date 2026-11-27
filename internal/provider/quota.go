@@ -19,6 +19,38 @@ var randReader io.Reader = rand.Reader
 // jsonUnmarshal is a thin indirection so tests can share the same decode path.
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
+// QuotaGroup is one named limit of a provider that splits its models into
+// groups with a limit each (Antigravity). A full group stops only its own models.
+type QuotaGroup struct {
+	Name     string  `json:"name"`
+	Percent  float64 `json:"percent"`
+	ResetsAt string  `json:"resets_at,omitempty"`
+}
+
+// QuotaGroups reads the groups out of a stored quota body; nil when it has none.
+func QuotaGroups(raw string) []QuotaGroup {
+	if !strings.Contains(raw, `"groups"`) {
+		return nil
+	}
+	var body struct {
+		Groups []struct {
+			Name     string   `json:"name"`
+			Percent  *float64 `json:"percent"`
+			ResetsAt string   `json:"resets_at"`
+		} `json:"groups"`
+	}
+	if json.Unmarshal([]byte(raw), &body) != nil {
+		return nil
+	}
+	var out []QuotaGroup
+	for _, g := range body.Groups {
+		if g.Name != "" && g.Percent != nil {
+			out = append(out, QuotaGroup{Name: g.Name, Percent: *g.Percent, ResetsAt: g.ResetsAt})
+		}
+	}
+	return out
+}
+
 // parsePercentQuota parses the opencode-go /usage shape:
 //
 //	{"usage":{"rolling":{"status","percent","resetsAt"},"weekly":{…},"monthly":{…}}}
@@ -49,7 +81,7 @@ func parsePercentQuota(body string) Quota {
 	return q
 }
 
-// parseMoneyQuota parses the ssn-gpt (space.stationine.com) /usage shape:
+// parseMoneyQuota parses the initech-gpt (api.example.com) /usage shape:
 //
 //	{"balance":0.2566,"remaining":…,"unit":"USD","cost":…,"actual_cost":…,
 //	 "usage":{"today":{requests,input_tokens,output_tokens,total_tokens,cost},
@@ -125,7 +157,7 @@ func ClassifyQuota(body string) Quota {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Host-scoped quota oracles — providers with no /v1/usage whose SAME inference
-// key can still read a balance endpoint. Design: docs/quota-oracles-design.md.
+// key can still read a balance endpoint. Design: docs/design/quota-oracles-design.md.
 // Every URL and parser below was live-probed 2026-10-14 with the operator's
 // own keys (zero-token GETs, UA ezllm/1.0).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -569,6 +601,9 @@ func parseClaudePrepaidCredits(body string) Quota {
 			return nil
 		}
 		v := *m.AmountMinor / math.Pow(10, m.Exponent)
+		if math.IsInf(v, 0) || math.IsNaN(v) {
+			return nil // a nonsense exponent; JSON cannot carry Inf
+		}
 		return &v
 	}
 	bal := units(raw.Balance)

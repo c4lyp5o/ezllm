@@ -18,6 +18,7 @@ type Values struct {
 	AutoProbe        bool   `json:"automatic_probing"`
 	CatalogInterval  string `json:"catalog_interval"`
 	PriceRefresh     bool   `json:"price_refresh"`
+	UpdateCheck      bool   `json:"update_check"`
 	Retries          int    `json:"retries"`
 	AttemptBudget    int    `json:"attempt_budget"`
 	DispatchDeadline string `json:"dispatch_deadline"`
@@ -38,10 +39,27 @@ type Values struct {
 	NotifyBridgeHeld bool   `json:"notify_bridge_update_blocked"`
 	NotifyBridgeBack bool   `json:"notify_bridge_rolled_back"`
 	NotifyStreamCut  bool   `json:"notify_stream_truncation"`
+	NotifyUpdate     bool   `json:"notify_update_available"`
+	// Early warnings, read by the hourly alert check: a quota window at or
+	// over AlertQuotaPct, a prepaid balance under AlertBalance, a session
+	// cookie expiring within AlertCookieHours.
+	NotifyQuota      bool    `json:"notify_quota_warning"`
+	AlertQuotaPct    int     `json:"alert_quota_percent"`
+	NotifyBalance    bool    `json:"notify_balance_low"`
+	AlertBalance     float64 `json:"alert_balance_below"`
+	NotifyCookie     bool    `json:"notify_cookie_expiring"`
+	AlertCookieHours int     `json:"alert_cookie_hours"`
+	// LedgerRetentionDays rolls calls older than this into daily totals and
+	// deletes them. 0 keeps every call.
+	LedgerRetentionDays int `json:"ledger_retention_days"`
+	// GeminiQueryKey accepts an ezllm key in the ?key= query string on the
+	// Gemini surface, as Google's own API does. Off: a URL lands in proxy and
+	// browser logs, and the key with it.
+	GeminiQueryKey bool `json:"gemini_query_key"`
 }
 
 func Defaults() Values {
-	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true}
+	return Values{UsageTZ: "UTC", Translation: true, AutoProbe: true, CatalogInterval: "12h", PriceRefresh: true, UpdateCheck: true, Retries: 3, AttemptBudget: 8, Cooldown429: "60s", Cooldown5xx: "60s", CooldownStrikes: 3, BackupHour: 3, BackupKeep: 7, NotifyAdded: true, NotifyRemoved: true, NotifyBroken: true, NotifyCatalog: true, NotifyBudget: true, NotifyPrices: true, NotifyBackup: true, NotifyBridgeUp: true, NotifyBridgeHeld: true, NotifyBridgeBack: true, NotifyStreamCut: true, NotifyUpdate: true, NotifyQuota: true, AlertQuotaPct: 80, NotifyBalance: true, AlertBalance: 2, NotifyCookie: true, AlertCookieHours: 48}
 }
 func (v Values) Validate() error {
 	if _, err := time.LoadLocation(v.UsageTZ); err != nil || v.UsageTZ == "" {
@@ -78,6 +96,18 @@ func (v Values) Validate() error {
 	if v.BackupKeep < 1 || v.BackupKeep > 365 {
 		return errors.New("backup_keep must be 1–365")
 	}
+	if v.AlertQuotaPct < 1 || v.AlertQuotaPct > 100 {
+		return errors.New("alert_quota_percent must be 1–100")
+	}
+	if v.AlertBalance <= 0 || v.AlertBalance > 1_000_000 {
+		return errors.New("alert_balance_below must be more than 0")
+	}
+	if v.AlertCookieHours < 1 || v.AlertCookieHours > 720 {
+		return errors.New("alert_cookie_hours must be 1–720")
+	}
+	if v.LedgerRetentionDays != 0 && (v.LedgerRetentionDays < 32 || v.LedgerRetentionDays > 3650) {
+		return errors.New("ledger_retention_days must be 0 (keep every call) or 32–3650")
+	}
 	return nil
 }
 func (v Values) Location() *time.Location {
@@ -112,6 +142,16 @@ func (v Values) Notify(kind string) bool {
 		return v.NotifyBridgeBack
 	case "stream_truncation":
 		return v.NotifyStreamCut
+	case "update_available":
+		return v.NotifyUpdate
+	case "quota_warning":
+		return v.NotifyQuota
+	case "balance_low":
+		return v.NotifyBalance
+	case "cookie_expiring":
+		return v.NotifyCookie
+	case "quota_read_refused":
+		return v.NotifyQuota || v.NotifyBalance
 	}
 	return true
 }
@@ -225,23 +265,31 @@ func (m *Manager) view() View {
 	}
 	return result
 }
-func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]json.RawMessage) (View, error) {
+
+// Validate reports whether changes would be accepted by Patch, without
+// saving anything: configuration import checks a file's settings this way
+// before it writes the rest.
+func (m *Manager) Validate(changes map[string]json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if revision != m.state.Revision {
-		return View{}, ErrConflict
-	}
-	next := State{Revision: revision + 1, Values: map[string]json.RawMessage{}}
+	_, _, err := m.apply(changes)
+	return err
+}
+
+// apply works out the state and values changes would produce. The caller
+// holds m.mu.
+func (m *Manager) apply(changes map[string]json.RawMessage) (State, Values, error) {
+	next := State{Values: map[string]json.RawMessage{}}
 	for k, v := range m.state.Values {
 		next.Values[k] = v
 	}
 	allowed := keys(m.base)
 	for k, v := range changes {
 		if _, ok := allowed[k]; !ok {
-			return View{}, fmt.Errorf("unknown setting %s", k)
+			return State{}, Values{}, fmt.Errorf("unknown setting %s", k)
 		}
 		if m.sources[k] == "environment" || m.sources[k] == "flag" {
-			return View{}, fmt.Errorf("%s is managed by %s", k, m.sources[k])
+			return State{}, Values{}, fmt.Errorf("%s is managed by %s", k, m.sources[k])
 		}
 		if string(v) == "null" {
 			delete(next.Values, k)
@@ -251,13 +299,27 @@ func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]
 	}
 	v, err := m.resolve(next.Values)
 	if err != nil {
-		return View{}, err
+		return State{}, Values{}, err
 	}
 	if m.Check != nil {
 		if err := m.Check(v); err != nil {
-			return View{}, err
+			return State{}, Values{}, err
 		}
 	}
+	return next, v, nil
+}
+
+func (m *Manager) Patch(ctx context.Context, revision int64, changes map[string]json.RawMessage) (View, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if revision != m.state.Revision {
+		return View{}, ErrConflict
+	}
+	next, v, err := m.apply(changes)
+	if err != nil {
+		return View{}, err
+	}
+	next.Revision = revision + 1
 	if err := m.store.SaveSettings(ctx, next, revision); err != nil {
 		if errors.Is(err, ErrConflict) {
 			return View{}, err

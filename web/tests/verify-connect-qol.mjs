@@ -10,7 +10,7 @@ const day = 86_400_000;
 const iso = (ms) => new Date(Date.now() + ms).toISOString();
 const tok = (id, name, o = {}) => ({ id, name, hint: `ez-…${id}${id}${id}${id}`, roles: ['infer'], enabled: true, cap_window: 'monthly', cap_tokens: 0, allowed_models: '', expires_at: '', last_used_at: iso(-2 * 3600e3), created_at: iso(-30 * day), ...o });
 const tokens = [
-  tok(1, 'hermes', { cap_tokens: 10_000_000, allowed_models: 'deepseek/*', expires_at: iso(200 * day) }),
+  tok(1, 'my-app', { cap_tokens: 10_000_000, allowed_models: 'deepseek/*', expires_at: iso(200 * day) }),
   tok(2, 'old', { expires_at: iso(-2 * day) }),
   tok(3, 'soon', { expires_at: iso(3 * day) }),
   tok(4, 'spent', { cap_tokens: 1000 }),
@@ -37,7 +37,7 @@ const page = await t.page(async (route, url) => {
   if (/^\/admin\/tokens\/5$/.test(p) && m === 'PATCH' && failToggle) { await json(route, { error: { message: 'could not change the key', type: 'server_error' } }, 500); return true; }
   if (/^\/admin\/tokens\/\d+$/.test(p) && m === 'PATCH') { await json(route, { ...tokens.find((x) => x.id === Number(p.split('/').pop())), ...JSON.parse(req.postData()) }); return true; }
   if (/^\/admin\/tokens\/\d+$/.test(p) && m === 'DELETE') { await json(route, {}); return true; }
-  if (p === '/admin/usage') { await json(route, { groups: [{ k: 'hermes', calls: 1204, tin: 2000000, tout: 500000 }, { k: 'spent', calls: 3, tin: 1500, tout: 600 }], totals: {} }); return true; }
+  if (p === '/admin/usage') { await json(route, { groups: [{ k: 'my-app', calls: 1204, tin: 2000000, tout: 500000 }, { k: 'spent', calls: 3, tin: 1500, tout: 600 }], totals: {} }); return true; }
   if (p === '/admin/routable-models') { await json(route, { data: routable }); return true; }
   if (p === '/v1/models') { v1Auth.push(req.headers()['authorization'] ?? ''); await json(route, { data: [{ id: 'a' }, { id: 'b' }] }); return true; }
   if (p === '/admin/requests') { reqQueries.push(url.search); return false; }
@@ -45,28 +45,28 @@ const page = await t.page(async (route, url) => {
 });
 const dialog = () => page.getByRole('dialog');
 const last = (re) => calls.filter((c) => re.test(c));
-const card = (name) => page.locator('div.rounded-xl', { has: page.getByRole('switch', { name: new RegExp(`key ${name}$`) }) }).last();
+const card = (name) => page.locator(`[data-key-row="${name}"]`);
 
 try {
   await page.goto(`${t.base}/connect`);
-  await page.getByRole('switch', { name: 'Disable key hermes' }).waitFor();
+  await page.getByRole('switch', { name: 'Disable key my-app' }).waitFor();
   check('summary counts keys and what needs attention', (await page.getByText(/6 keys · 3 active/).count()) === 1 && (await page.getByText('1 expiring soon').count()) === 1 && (await page.getByText('1 expired').count()) === 1 && (await page.getByText('1 over budget').count()) === 1);
   check('status chips: active / expired / expiring / spent / disabled',
-    (await card('hermes').getByText('Active', { exact: true }).count()) === 1 && (await card('old').getByText('Expired', { exact: true }).count()) === 1
+    (await card('my-app').getByText('Active', { exact: true }).count()) === 1 && (await card('old').getByText('Expired', { exact: true }).count()) === 1
     && (await card('soon').getByText(/Expires in 3 days/).count()) === 1 && (await card('spent').getByText('Budget spent').count()) === 1 && (await card('off').getByText('Disabled', { exact: true }).count()) === 1);
-  check('last use is relative', (await card('hermes').getByText('used 2h ago').count()) === 1 && (await card('off').getByText('never used').count()) === 1);
-  check('usage reads in plain numbers', (await card('hermes').getByText(/1,204 calls · 2,000,000 in · 500,000 out/).count()) === 1);
+  check('last use is relative', (await card('my-app').getByText('used 2h ago').count()) === 1 && (await card('off').getByText('never used').count()) === 1);
+  check('usage reads in plain numbers', (await card('my-app').getByText(/1,204 calls/).count()) === 1 && (await card('my-app').getByText(/2,000,000 in · 500,000 out/).count()) === 1);
   check('the budget meter shows spend against the cap', (await card('spent').getByText('2,100 / 1,000').count()) === 1);
-  check('each key links to its requests', (await card('hermes').getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('client=hermes'));
+  check('each key links to its requests', (await card('my-app').getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('client=my-app'));
 
   // filter + search
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^Needs attention/ }).click();
-  check('Needs attention lists expired, expiring and spent keys', (await page.getByRole('switch', { name: /key (old|soon|spent)$/ }).count()) === 3 && (await page.getByRole('switch', { name: /key hermes$/ }).count()) === 0);
+  check('Needs attention lists expired, expiring and spent keys', (await page.getByRole('switch', { name: /key (old|soon|spent)$/ }).count()) === 3 && (await page.getByRole('switch', { name: /key my-app$/ }).count()) === 0);
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Disabled' }).click();
-  check('Disabled lists disabled keys', (await page.getByRole('switch', { name: /key off$/ }).count()) === 1 && (await page.getByRole('switch', { name: /key hermes$/ }).count()) === 0);
+  check('Disabled lists disabled keys', (await page.getByRole('switch', { name: /key off$/ }).count()) === 1 && (await page.getByRole('switch', { name: /key my-app$/ }).count()) === 0);
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All' }).click();
   await page.getByLabel('Search keys').fill('deepseek');
-  check('search matches allowed models', (await page.getByRole('switch', { name: /key hermes$/ }).count()) === 1 && (await page.getByRole('switch', { name: /key old$/ }).count()) === 0);
+  check('search matches allowed models', (await page.getByRole('switch', { name: /key my-app$/ }).count()) === 1 && (await page.getByRole('switch', { name: /key old$/ }).count()) === 0);
   await page.getByLabel('Search keys').fill('');
 
   // switch error + success
@@ -81,16 +81,16 @@ try {
 
   // revoke
   calls.length = 0;
-  await card('hermes').getByRole('button', { name: 'Revoke' }).click();
+  await card('my-app').getByRole('button', { name: 'Revoke' }).click();
   await dialog().getByText(/made 1,204 requests in the last 30 days/).waitFor();
   check('revoke warns when the key is in use', (await dialog().getByText(/disable it instead/).count()) === 1);
   await dialog().getByRole('button', { name: 'Revoke', exact: true }).click();
-  await page.getByText('Revoked hermes.').waitFor();
+  await page.getByText('Revoked my-app.').waitFor();
   check('revoke deletes and says so', last(/^DELETE \/admin\/tokens\/1/).length === 1, calls);
 
   // create
   await page.getByRole('button', { name: /Create key/ }).first().click();
-  await dialog().getByLabel('Name', { exact: true }).fill('Hermes');
+  await dialog().getByLabel('Name', { exact: true }).fill('My-App');
   check('a taken name is refused, case-insensitively, with the consequence', (await dialog().getByText(/already exists. Creating it again would replace its secret/).count()) === 1);
   calls.length = 0;
   await dialog().getByLabel('Name', { exact: true }).press('Enter');
@@ -101,8 +101,10 @@ try {
   check('admin role shows its warning', (await dialog().getByText(/Keep it for yourself/).count()) === 1);
   check('ticking admin ticks nothing else', !(await dialog().getByRole('checkbox', { name: /Metrics/ }).isChecked()));
   await dialog().getByRole('checkbox', { name: /Admin/ }).uncheck();
-  await dialog().getByLabel('Allowed models', { exact: false }).first().fill('deep*');
+  await dialog().getByLabel('Allowed models', { exact: false }).first().fill('*chat');
   check('a glob that cannot cross / says it matches nothing', (await dialog().getByText(/Doesn't match any of the 4 models available right now/).count()) === 1);
+  await dialog().locator('#tk-models').fill('deep*');
+  check('a trailing * is a prefix across /, as on the server', (await dialog().getByText(/Matches 2 of 4 available models/).count()) === 1);
   await dialog().locator('#tk-models').fill('deepseek/*');
   check('the allowlist readout counts matches', (await dialog().getByText(/Matches 2 of 4 available models/).count()) === 1);
   await dialog().getByRole('button', { name: '90 days', exact: true }).click();
@@ -111,11 +113,11 @@ try {
   check('a budget quick value sets the cap', (await dialog().getByLabel('Token cap').inputValue()) === '1000000');
   calls.length = 0;
   await dialog().getByLabel('Name', { exact: true }).press('Enter');
-  await page.getByRole('dialog', { name: 'New API key' }).waitFor();
+  await page.getByRole('dialog', { name: 'New app key' }).waitFor();
   const posted = last(/^POST \/admin\/tokens /)[0] ?? '';
   check('create sends name, role, allowlist and expiry', /"name":"laptop"/.test(posted) && /"roles":\["infer"\]/.test(posted) && /"allowed_models":"deepseek\/\*"/.test(posted) && /"expires_at":"\d{4}-\d\d-\d\d"/.test(posted), posted);
   check('the budget is saved with a second call', last(/^PATCH \/admin\/tokens\/9 .*"cap_tokens":1000000.*"cap_window":"monthly"|^PATCH \/admin\/tokens\/9 .*"cap_window":"monthly".*"cap_tokens":1000000/).length === 1, calls);
-  const panel = page.getByRole('dialog', { name: 'New API key' });
+  const panel = page.getByRole('dialog', { name: 'New app key' });
   check('the plaintext is shown', (await panel.getByText('ez-secret-123', { exact: true }).count()) === 1);
   check('the snippet already has the real key in it', (await panel.getByText(/OPENAI_API_KEY=ez-secret-123/).count()) === 1);
   await panel.getByRole('button', { name: 'curl' }).click();
@@ -128,11 +130,27 @@ try {
   await panel.getByRole('button', { name: 'I saved it' }).click();
   await page.getByText('Created laptop.').waitFor();
   check('closing the panel says what was created', true);
+  await panel.waitFor({ state: 'detached' });
 
   // policy
+  // Watch every DOM change while the dialog opens: Save must never be
+  // enabled, not even for the first frame before the key's values load.
+  await page.evaluate(() => {
+    window.__saveEverEnabled = false;
+    const look = () => {
+      for (const b of document.querySelectorAll('[role="dialog"] button[type="submit"]')) {
+        if (b.textContent.trim() === 'Save' && !b.disabled) window.__saveEverEnabled = true;
+      }
+    };
+    window.__saveWatch = new MutationObserver(look);
+    window.__saveWatch.observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
   await card('spent').getByRole('button', { name: 'Policy' }).click();
   const save = dialog().getByRole('button', { name: 'Save', exact: true });
-  check('Save is disabled until something changes', await save.isDisabled());
+  await save.waitFor();
+  await page.waitForTimeout(300);
+  const everEnabled = await page.evaluate(() => { window.__saveWatch.disconnect(); return window.__saveEverEnabled; });
+  check('Save is disabled until something changes', await save.isDisabled() && !everEnabled, { everEnabled });
   await dialog().getByRole('button', { name: '10,000,000', exact: true }).click();
   check('the cap reads back in words', (await dialog().getByText('10,000,000 tokens per month').count()) === 1);
   await page.keyboard.press('Escape');
@@ -162,7 +180,7 @@ try {
 
   // deep links
   await page.goto(`${t.base}/connect?new=1`);
-  await dialog().getByText('Create an API key').waitFor();
+  await dialog().getByText('Create an app key').waitFor();
   check('?new=1 opens the create form', true);
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/connect?policy=4`);
@@ -171,12 +189,12 @@ try {
   await page.keyboard.press('Escape');
 
   // requests page
-  await page.goto(`${t.base}/requests?client=hermes`);
+  await page.goto(`${t.base}/requests?client=my-app`);
   const keySel = page.locator('select', { has: page.locator('option', { hasText: 'All keys' }) });
   await keySel.waitFor();
   await page.waitForTimeout(400);
-  check('Requests sends the API-key filter', reqQueries.some((q) => q.includes('client=hermes')), reqQueries);
-  check('Requests shows the key select', (await keySel.inputValue()) === 'hermes');
+  check('Requests sends the API-key filter', reqQueries.some((q) => q.includes('client=my-app')), reqQueries);
+  check('Requests shows the key select', (await keySel.inputValue()) === 'my-app');
 } catch (e) {
   check('driver ran to completion', false, String(e));
 } finally {

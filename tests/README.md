@@ -16,7 +16,7 @@ One convention across every script: a bare variable is a **value**, a
 |---|---|---|
 | `EZLLM_BASE` | gateway origin | per script, below |
 | `EZLLM_TOKEN` | client/infer token value | — |
-| `EZLLM_TOKEN_FILE` | token file (admin for the admin proofs, infer for `prove_lmeval.py`) | `~/.hermes/secrets/ezllm-admin.token` / `ezllm-infer.token` |
+| `EZLLM_TOKEN_FILE` | token file (admin for the admin proofs, infer for `prove_lmeval.py`) | `~/.config/ezllm/ezllm-admin.token` / `ezllm-infer.token` |
 | `EZLLM_ADMIN_TOKEN` / `EZLLM_ADMIN_TOKEN_FILE` | admin token value / file, where a script needs both roles | — |
 | `EZLLM_DB` | ledger to cross-check | per script |
 
@@ -28,11 +28,13 @@ written against, so a bare run never hits production by accident:
 | `prove_requests.py`, `prove_phase2.py`, `prove_daynight.py`, `prove_caveman*.py` | `http://127.0.0.1:20199` | scratch instance with the echo upstream |
 | `prove_nim_keytest.py` | `http://127.0.0.1:20139` | NIM canary instance |
 | `prove_lmeval.py` | `http://127.0.0.1:20129` | local gateway |
-| `prove_claude_bridge.py` | `EZLLM_URL`, default the public front door | spends real subscription tokens; needs `EZLLM_TOKEN` |
-| `prove_codex_bridge.py` | `EZLLM_URL`, default the public front door | spends real ChatGPT subscription tokens; needs `EZLLM_TOKEN` |
+| `prove_claude_bridge.py` | `EZLLM_URL`, default `http://127.0.0.1:20129` | spends real subscription tokens; needs `EZLLM_TOKEN` |
+| `prove_codex_bridge.py` | `EZLLM_URL`, default `http://127.0.0.1:20129` | spends real ChatGPT subscription tokens; needs `EZLLM_TOKEN` |
 
 Exit 0 means every assertion in the script held.
 
+This checks every script's syntax without running anything:
+
 ```bash
-python3 -m py_compile tests/*.py   # syntax check without running anything
+python3 -m py_compile tests/*.py
 ```

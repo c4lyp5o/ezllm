@@ -6,6 +6,7 @@
 // do I change (one settings row per card). Test outcomes live at page level so
 // a result stays on its card after the list refetches, and so "Test all
 // configured" can fill every card in one pass.
+import { ExtraIntro } from '../components/ExtraIntro';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -19,6 +20,9 @@ import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { GENERATABLE, ServiceTryIt } from '../components/ServiceTryIt';
 
 type CatalogModel = ModelRow & { id: string; display: string };
+
+/** Provider catalogs read at once on this page. */
+const CATALOG_CONCURRENCY = 4;
 
 // Per-surface test-prompt defaults: what the operator sees pre-filled in the
 // card, matching the backend's serviceProbeBody defaults exactly (empty prompt
@@ -411,22 +415,28 @@ export default function Services() {
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'Could not load services.');
       } finally { if (live) setLoading(false); }
-      // Every provider's catalog at once, merged as each answers: one slow or
-      // broken provider no longer holds the picker (or the whole list) back.
+      // Provider catalogs, four at a time, merged as each answers: one slow or
+      // broken provider never holds the picker back, and twenty providers no
+      // longer mean twenty requests at once.
       try {
-        const accounts = await get<Account[]>('/admin/accounts');
+        const accounts = (await get<Account[]>('/admin/accounts')).filter((a) => a.enabled);
         let gaps = 0;
-        await Promise.all(accounts.filter((a) => a.enabled).map(async (account) => {
-          try {
-            const rows = await accountModels(account.id);
-            if (!live) return;
-            setModels((prev) => [...prev, ...rows.map((model) => ({
-              ...model,
-              id: `${account.namespace}/${model.id}`,
-              display: `${account.namespace} / ${model.display ?? model.id}`,
-            }))]);
-          } catch { gaps++; }
-        }));
+        let next = 0;
+        const worker = async () => {
+          while (live && next < accounts.length) {
+            const account = accounts[next++];
+            try {
+              const rows = await accountModels(account.id);
+              if (!live) return;
+              setModels((prev) => [...prev, ...rows.map((model) => ({
+                ...model,
+                id: `${account.namespace}/${model.id}`,
+                display: `${account.namespace} / ${model.display ?? model.id}`,
+              }))]);
+            } catch { gaps++; }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(CATALOG_CONCURRENCY, accounts.length) }, worker));
         if (live) setCatalogGaps(gaps);
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : 'Could not load provider models.');
@@ -510,6 +520,12 @@ export default function Services() {
   const configured = counts.failing + counts.pending + counts.working;
   return (
     <div className="mx-auto max-w-6xl space-y-5">
+      {configured === 0 && (
+        <ExtraIntro title="Services" action="Choose models"
+          onAction={() => { setFilter('all'); requestAnimationFrame(() => document.getElementById('services-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>
+          <p>Beyond chat, ezllm can serve embeddings, images, speech and transcription through the same address and app keys. Pick a model for each and your apps can use them right away.</p>
+        </ExtraIntro>
+      )}
       <div className="rounded-xl border border-line bg-surface px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <div>
@@ -549,7 +565,7 @@ export default function Services() {
         </details>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div id="services-list" className="flex scroll-mt-4 flex-wrap items-center justify-between gap-3">
         <Segmented<Filter> label="Filter services"
           options={[
             { key: 'all', label: `All ${cards.length}` },

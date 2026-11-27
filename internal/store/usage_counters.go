@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/tzloc"
 )
 
 // CountedTokens is THE documented quantity a cap metering counts: prompt plus
@@ -209,7 +211,7 @@ func (w windowSpec) loc() *time.Location {
 	if w.tz == "" {
 		return time.UTC
 	}
-	if l, err := time.LoadLocation(w.tz); err == nil {
+	if l, err := tzloc.Load(w.tz); err == nil {
 		return l
 	}
 	return time.UTC

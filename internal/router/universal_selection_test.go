@@ -100,7 +100,7 @@ func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
 	for _, conv := range []provider.UsageConvention{provider.UsageConventionAuto, provider.UsageConventionTotal} {
-		cat.accounts["super-ssn"].UsageConvention = conv
+		cat.accounts["initech"].UsageConvention = conv
 		if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat); err != nil || wire != provider.SurfaceAnthropic || !translated {
 			t.Fatalf("convention %q: wire=%q translated=%v err=%v; want messages", conv, wire, translated, err)
 		}
@@ -112,7 +112,7 @@ func TestUniversalChatClientPrefersResponsesThenMessages(t *testing.T) {
 // chat client reaches it translated instead of being refused.
 func TestUniversalAnthropicKindIsMessagesEvidence(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
-	cat.accounts["super-ssn"].Kind = provider.KindAnthropicCompat
+	cat.accounts["initech"].Kind = provider.KindAnthropicCompat
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 
@@ -139,7 +139,7 @@ func TestUniversalResponsesClientPrefersChatThenMessages(t *testing.T) {
 
 	delete(cat.yesProto, probeKey(2, "gpt-6.1-sol", provider.SurfaceChat))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
-	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionAnthropic
+	cat.accounts["initech"].UsageConvention = provider.UsageConventionAnthropic
 	if wire, translated, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceResponses); err != nil || wire != provider.SurfaceAnthropic || !translated {
 		t.Fatalf("wire=%q translated=%v err=%v; want messages fallback", wire, translated, err)
 	}
@@ -150,7 +150,7 @@ func TestUniversalResponsesClientPrefersChatThenMessages(t *testing.T) {
 func TestUniversalAlternativeRequiresProvenCapability(t *testing.T) {
 	cat := withProbes(withCombo(newFake(), singleHopCombo("gpt-6.1-sol", 2)))
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
-	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionTotal
+	cat.accounts["initech"].UsageConvention = provider.UsageConventionTotal
 
 	_, _, err := resolveWire(t, universalResolver(cat), wireCombo, provider.SurfaceChat)
 	var wu *ErrWireUnsupported
@@ -180,7 +180,7 @@ func TestUniversalMessagesPinServesChatClients(t *testing.T) {
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
 	cat.pins = map[string]string{"2/gpt-6.1-sol": "anthropic"}
 
-	for _, target := range []string{wireCombo, "super-ssn/gpt-6.1-sol"} {
+	for _, target := range []string{wireCombo, "initech/gpt-6.1-sol"} {
 		if wire, translated, err := resolveWire(t, universalResolver(cat), target, provider.SurfaceChat); err != nil || wire != provider.SurfaceAnthropic || !translated {
 			t.Fatalf("%s: wire=%q translated=%v err=%v; want the pinned messages wire", target, wire, translated, err)
 		}
@@ -242,11 +242,11 @@ func TestUniversalDirectMatchesCombo(t *testing.T) {
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceChat)] = true
 	cat.noProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceResponses)] = true
 	cat.yesProto[probeKey(2, "gpt-6.1-sol", provider.SurfaceAnthropic)] = true
-	cat.accounts["super-ssn"].UsageConvention = provider.UsageConventionTotal
+	cat.accounts["initech"].UsageConvention = provider.UsageConventionTotal
 	r := universalResolver(cat)
 
 	combo, _, cerr := resolveWire(t, r, wireCombo, provider.SurfaceChat)
-	direct, _, derr := resolveWire(t, r, "super-ssn/gpt-6.1-sol", provider.SurfaceChat)
+	direct, _, derr := resolveWire(t, r, "initech/gpt-6.1-sol", provider.SurfaceChat)
 	if cerr != nil || derr != nil {
 		t.Fatalf("combo err=%v direct err=%v", cerr, derr)
 	}

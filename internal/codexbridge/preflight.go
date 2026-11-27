@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/c4lyp5o/ezllm/internal/bridgeutil"
 )
 
 // QualifiedVersion is the CLI release the M0 measurements and the
@@ -168,7 +170,8 @@ func lockdownViolations(list string) []string {
 func missingFlags(help string, flags []string) []string {
 	var missing []string
 	for _, f := range flags {
-		if !strings.Contains(help, f) {
+		// A whole flag: --sandbox must not match --sandbox-policy.
+		if !bridgeutil.HelpHasFlag(help, f) {
 			missing = append(missing, f)
 		}
 	}

@@ -286,3 +286,124 @@ func TestMigrateV23AddsFreshToolOutput(t *testing.T) {
 		t.Errorf("fresh_tool_output did not round-trip: %q", got.FreshToolOutput)
 	}
 }
+
+// PickKeys lists every enabled key, oldest first, live and from a snapshot;
+// PickKey stays the first of them.
+func TestPickKeysListsEveryEnabledKey(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{Name: "acme", Namespace: "acme",
+		Kind: provider.KindOpenAICompatible, BaseURL: "https://api.example.com/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, k := range []string{"sk-one", "sk-two", "sk-three"} {
+		kid, _, err := db.AddKey(ctx, id, k, k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, kid)
+	}
+	if _, err := db.Writer().Exec(`UPDATE provider_keys SET enabled=0 WHERE id=?`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]func() ([]KeyPick, error){
+		"live":     func() ([]KeyPick, error) { return db.PickKeys(ctx, id) },
+		"snapshot": func() ([]KeyPick, error) { return snap(t, db).PickKeys(ctx, id) },
+	} {
+		keys, err := got()
+		if err != nil || len(keys) != 2 || keys[0].Plaintext != "sk-one" || keys[1].Plaintext != "sk-three" {
+			t.Fatalf("%s: keys=%+v err=%v, want sk-one and sk-three", name, keys, err)
+		}
+	}
+	if k, err := db.PickKey(ctx, id); err != nil || k.ID != ids[0] {
+		t.Fatalf("PickKey = %+v %v, want the oldest key", k, err)
+	}
+	if _, err := db.PickKeys(ctx, 9999); err != ErrNotFound {
+		t.Fatalf("no keys: err=%v, want ErrNotFound", err)
+	}
+}
+
+// Pruning removes old quota reads but keeps each key's newest, however old.
+func TestPruneQuotaSnapshotsKeepsNewestPerKey(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	id, err := db.UpsertAccount(ctx, provider.Account{Name: "acme", Namespace: "acme",
+		Kind: provider.KindOpenAICompatible, BaseURL: "https://api.example.com/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k1, _, _ := db.AddKey(ctx, id, "one", "sk-one")
+	k2, _, _ := db.AddKey(ctx, id, "two", "sk-two")
+	for _, row := range []struct {
+		key int64
+		at  string
+	}{{k1, "2026-01-01T00:00:00.000Z"}, {k1, "2026-01-02T00:00:00.000Z"}, {k1, "2099-01-01T00:00:00.000Z"}, {k2, "2026-01-03T00:00:00.000Z"}} {
+		if _, err := db.Writer().Exec(`INSERT INTO quota_snapshots (provider_key_id, kind, read_at, raw, ok) VALUES (?, 'money', ?, '{}', 1)`, row.key, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := db.PruneQuotaSnapshots(ctx, 24*time.Hour)
+	if err != nil || n != 2 {
+		t.Fatalf("pruned %d (%v), want key one's two old reads", n, err)
+	}
+	var left int
+	_ = db.Reader().QueryRow(`SELECT COUNT(*) FROM quota_snapshots WHERE provider_key_id=?`, k2).Scan(&left)
+	if left != 1 {
+		t.Fatalf("key two's only (old) read was pruned")
+	}
+}
+
+// ListAccounts fills every account from bulk queries: each gets its own keys,
+// its own newest quota read (across its keys, never another account's) and
+// its own model counts.
+func TestListAccountsHydratesEachAccount(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	mk := func(ns string) int64 {
+		id, err := db.UpsertAccount(ctx, provider.Account{Name: ns, Namespace: ns, Kind: provider.KindOpenAICompatible, BaseURL: "https://" + ns + ".example.com/v1", Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a, b, c := mk("acme"), mk("globex"), mk("initech")
+	a1, _, _ := db.AddKey(ctx, a, "one", "sk-a1")
+	a2, _, _ := db.AddKey(ctx, a, "two", "sk-a2")
+	b1, _, _ := db.AddKey(ctx, b, "one", "sk-b1")
+	snap := func(key int64, at, kind string, bal float64) {
+		if _, err := db.Writer().Exec(`INSERT INTO quota_snapshots (provider_key_id, kind, balance, read_at, raw, ok) VALUES (?,?,?,?,'{}',1)`, key, kind, bal, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap(a1, "2026-11-01T00:00:00.000Z", "money", 10)
+	snap(a2, "2026-11-02T00:00:00.000Z", "money", 7) // acme's newest, on its second key
+	snap(b1, "2026-11-03T00:00:00.000Z", "money", 99)
+	if err := db.UpsertModels(ctx, a, []provider.ModelInfo{{ID: "m1"}, {ID: "m2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(`UPDATE models SET proto_chat=1 WHERE account_id=? AND model_id='m1'`, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertModels(ctx, b, []provider.ModelInfo{{ID: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := db.ListAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64]AccountSummary{}
+	for _, s := range all {
+		got[s.ID] = s
+	}
+	if s := got[a]; len(s.Keys) != 2 || s.Quota == nil || *s.Quota.Balance != 7 || s.ModelsCount != 2 || s.ProtocolSupport["chat"] != 1 || s.ProtocolSupport["untested"] != 1 {
+		t.Errorf("acme = keys %d quota %+v models %d protocols %v", len(s.Keys), s.Quota, s.ModelsCount, s.ProtocolSupport)
+	}
+	if s := got[b]; len(s.Keys) != 1 || s.Quota == nil || *s.Quota.Balance != 99 || s.ModelsCount != 1 {
+		t.Errorf("globex = keys %d quota %+v models %d", len(s.Keys), s.Quota, s.ModelsCount)
+	}
+	if s := got[c]; s.Keys == nil || len(s.Keys) != 0 || s.Quota != nil || s.ModelsCount != 0 || s.ProtocolSupport == nil {
+		t.Errorf("initech (nothing) = %+v", s)
+	}
+}

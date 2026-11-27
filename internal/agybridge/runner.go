@@ -59,6 +59,9 @@ type Runner struct {
 	SessionCache     bool
 	CacheIdleTimeout time.Duration
 	cacheMu          sync.Mutex
+	usageMu          sync.Mutex // one /usage read at a time; see PlanUsage
+	usageAt          time.Time
+	usageLast        []PlanBucket
 	cached           map[*cachedConversation]struct{}
 	cacheClosed      bool
 	cacheHits        uint64
@@ -95,12 +98,8 @@ func (r *Runner) slots() *bridgeutil.Slots {
 // that flag (measured, 1.4.7: exit 2, "-p took --output-format as its
 // prompt"). The prompt arrives on stdin, so the value is explicitly empty.
 func argv(req Request) []string {
-	a := []string{"--print=", "--output-format", "stream-json", "--input-format", "stream-json",
+	return []string{"--print=", "--output-format", "stream-json", "--input-format", "stream-json",
 		"--disable-slash-commands", "--model", req.Model}
-	if req.Effort != "" {
-		a = append(a, "--effort", req.Effort)
-	}
-	return a
 }
 
 // frame is one stdout NDJSON line.
@@ -240,6 +239,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	_ = stdin.Close()
 
 	lines := make(chan []byte)
+	readErr := make(chan error, 1)
 	go func() {
 		defer close(lines)
 		sc := bufio.NewScanner(stdout)
@@ -251,6 +251,7 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 				return
 			}
 		}
+		readErr <- sc.Err()
 	}()
 
 	var res Result
@@ -332,6 +333,16 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	waited = true
 
 	if final == nil {
+		// A line over the reader's limit ends the read early: say so rather
+		// than "exited without a result".
+		select {
+		case rerr := <-readErr:
+			if rerr != nil {
+				return res, &NativeError{Status: 502, Type: "api_error", Code: "native_error",
+					Message: "agy-bridge: the CLI's output is unreadable: " + rerr.Error()}
+			}
+		default:
+		}
 		code := cmd.ProcessState.ExitCode()
 		return res, &NativeError{Status: 502, Type: "api_error", Code: "native_error",
 			Message: fmt.Sprintf("agy-bridge: the CLI exited %d without a result%s", code, r.stderrNote(&stderrTail))}
@@ -355,9 +366,18 @@ func (r *Runner) run(runCtx context.Context, req Request, delta func(string) err
 	res.StructuredOutput = out.StructuredOutput
 	// A turn that streamed nothing (or less than its answer) still delivers
 	// the whole response: the envelope is authoritative.
-	if delta != nil && streamed.Len() == 0 && res.Text != "" {
-		if err := delta(res.Text); err != nil {
-			return res, err
+	if delta != nil && res.Text != "" {
+		rest := ""
+		switch {
+		case streamed.Len() == 0:
+			rest = res.Text
+		case len(res.Text) > streamed.Len() && strings.HasPrefix(res.Text, streamed.String()):
+			rest = res.Text[streamed.Len():]
+		}
+		if rest != "" {
+			if err := delta(rest); err != nil {
+				return res, err
+			}
 		}
 	}
 	return res, nil

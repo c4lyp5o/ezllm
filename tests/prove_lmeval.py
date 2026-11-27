@@ -12,13 +12,13 @@ Two traps this already solved (do not re-learn them):
     loglikelihood tasks (mmlu, arc, hellaswag) — those CANNOT work here.
     Use `local-chat-completions` + a generate_until task (gsm8k).
   * tokenizer_backend=auto probes {base_url}/tokenizer_info and falls back to
-    loading `model` as a HuggingFace repo id. Our model is `opengo/deepseek-flash`,
+    loading `model` as a HuggingFace repo id. Our model is `demo/deepseek-flash`,
     not a repo, so that path dies. Pass tokenizer_backend=none + apply_chat_template.
 
 Env-overridable (scratch-instance defaults):
   EZLLM_BASE   gateway origin        default http://127.0.0.1:20129
   EZLLM_TOKEN       infer token VALUE   (wins when set)
-  EZLLM_TOKEN_FILE  infer token file    default ~/.hermes/secrets/ezllm-infer.token
+  EZLLM_TOKEN_FILE  infer token file    default ~/.config/ezllm/ezllm-infer.token
   EZLLM_LMEVAL path to lm_eval CLI   default ~/.venvs/lm-eval/bin/lm_eval
   EZLLM_TASK   task name             default gsm8k
   EZLLM_LIMIT  examples              default 100
@@ -42,7 +42,7 @@ BASE = os.environ.get("EZLLM_BASE", "http://127.0.0.1:20129")
 # EZLLM_TOKEN is a token VALUE in every script (prove_claude_bridge reads it
 # that way); a path lives in EZLLM_TOKEN_FILE.
 TOKEN_FILE = Path(os.environ.get("EZLLM_TOKEN_FILE",
-                                 str(Path.home() / ".hermes/secrets/ezllm-infer.token")))
+                                 str(Path.home() / ".config/ezllm/ezllm-infer.token")))
 LM_EVAL = os.environ.get("EZLLM_LMEVAL",
                          str(Path.home() / ".venvs/lm-eval/bin/lm_eval"))
 TASK = os.environ.get("EZLLM_TASK", "gsm8k")
@@ -50,9 +50,9 @@ LIMIT = int(os.environ.get("EZLLM_LIMIT", "100"))
 REPO = Path(__file__).resolve().parent.parent
 DB = Path(os.environ.get("EZLLM_DB", str(REPO / "data" / "ezllm.sqlite")))
 OUT = Path(os.environ.get("EZLLM_OUT",
-                          str(Path.home() / ".hermes/cache/scratch/ezllm-lmeval")))
+                          str(Path.home() / ".cache/ezllm/ezllm-lmeval")))
 LOG = Path(os.environ.get("EZLLM_LOG",
-                          str(Path.home() / ".hermes/cache/scratch/lmeval.log")))
+                          str(Path.home() / ".cache/ezllm/lmeval.log")))
 
 # chat-endpoint-only shape: no loglikelihood, so generate_until tasks only.
 MODEL_ARGS = (
@@ -129,7 +129,7 @@ def main() -> None:
                     help="skip lm-eval, just inspect the ledger")
     args = ap.parse_args()
 
-    model = os.environ.get("EZLLM_MODEL", "opengo/deepseek-flash")
+    model = os.environ.get("EZLLM_MODEL", "demo/deepseek-flash")
     before = row_count()
 
     if not args.ledger_only:

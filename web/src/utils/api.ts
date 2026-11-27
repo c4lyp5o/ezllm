@@ -4,9 +4,9 @@ import { fmtMs, formatTokens } from './lib';
 const UNLOCK_KEY = 'ezllm.admin.unlocked';
 
 /** The session lives in an HttpOnly cookie that JS cannot read or clear; this
- *  only drops the in-tab "unlocked" marker. */
+ *  only drops the "unlocked" marker. */
 export function clearToken(): void {
-  try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
+  try { localStorage.removeItem(UNLOCK_KEY); sessionStorage.removeItem(UNLOCK_KEY); } catch { /* noop */ }
 }
 
 /** Sign out: revoke the session server-side (the HttpOnly cookie cannot be
@@ -19,12 +19,16 @@ export async function logout(): Promise<void> {
   clearToken();
 }
 /** Cookie sessions are httpOnly, so JS cannot inspect them. This marker only
- *  says "this tab logged in"; the cookie is what actually authenticates. */
+ *  says "this browser logged in"; the cookie is what actually authenticates.
+ *  It lives in localStorage so a link opened in a new tab does not ask for the
+ *  password again (and mint a second session) while the cookie is still good.
+ *  A dead cookie still lands on the login page: the first 401 clears it. */
 export function isUnlocked(): boolean {
-  try { return sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
+  // sessionStorage too: tabs unlocked before this moved, and the test drivers.
+  try { return localStorage.getItem(UNLOCK_KEY) === '1' || sessionStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
 }
 export function markUnlocked(): void {
-  try { sessionStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
+  try { localStorage.setItem(UNLOCK_KEY, '1'); } catch { /* noop */ }
 }
 
 /** An auth-gate failure that keeps the server's status and error type, so
@@ -250,7 +254,9 @@ export type Bridge = {
   usage_convention: string;
   enabled: boolean;
   env: string;
+  setup: string;
   runbook: string;
+  docs: string;
   status?: Record<string, unknown>;
   update?: BridgeUpdate;
   runtime?: BridgeAdmission & Record<string, unknown>;
@@ -361,7 +367,7 @@ export type Health = {
   status: string; version: string; schema_version: number; accounts: number; provider_keys: number;
   models: number; combos: number; ledger_rows: number; dropped_rows: number;
   lost_rows?: number; unmetered_rows?: number; uptime_s: number;
-  /** Per-hop stream outcomes (docs/hop-health-design.md). Absent on an older
+  /** Per-hop stream outcomes (docs/design/hop-health-design.md). Absent on an older
    *  server, so every consumer must default it to []. */
   hop_stream_health?: HopStream[];
   stream_window_s?: number;
@@ -379,6 +385,8 @@ export type QuotaSnapshot = {
   requests_today?: number | null;
   resets_at?: string | null;
   read_at?: string | null;
+  /** Named limits, when the provider splits its models into groups. */
+  groups?: { name: string; percent: number; resets_at?: string }[];
 };
 
 export type KeyRow = {
@@ -612,7 +620,7 @@ export const FOCUS_HINT: Record<FocusKey, string> = {
 export function focusValue(f: FocusKey, r: UsageRow): number {
   switch (f) {
     case 'cache': return r.cread + r.cwrite;
-    case 'savings': return r.context_saved + r.saved;
+    case 'savings': return r.context_saved + (r.applied_saved ?? 0);
     case 'reasoning': return r.reasoning;
     case 'latency': return r.p50_ttft_ms;
     case 'errors': return r.errors;
@@ -848,6 +856,11 @@ export const modelRules = () => get<ModelRule[]>('/admin/model-rules');
 export const accountModels = (id: number) => get<ModelRow[]>(`/admin/accounts/${id}/models`);
 
 /** Pin a model to one surface ("" clears). force=true allows a surface the probe never confirmed. */
+/** Hands a hand-set (curated) verdict back to the tests: verdicts stay as recorded,
+ *  the curation and its note clear, and the next test may change them. */
+export const releaseModelVerdict = (accountId: number, model: string) =>
+  put(`/admin/accounts/${accountId}/model-protocol`, { model, release: true });
+
 export const setModelPin = (accountId: number, model: string, pin: string, force = false) =>
   apiFetch<{ model: string; pin: string }>(
     `/admin/accounts/${accountId}/model-pin`,
@@ -1015,6 +1028,9 @@ export const createModelRule = (r: Partial<ModelRule> & { account_id: number; mo
 export const updateModelRule = (id: number, r: Partial<ModelRule>) =>
   patch<ModelRule>(`/admin/model-rules/${id}`, r);
 export const deleteModelRule = (id: number) => del(`/admin/model-rules/${id}`);
+/** A group edit in one transaction: every rule saves, or none does. */
+export const applyModelRules = (body: { upsert?: Array<Partial<ModelRule> & { account_id: number; model_id: string }>; delete?: number[] }) =>
+  post<{ saved: number; deleted: number }>('/admin/model-rules/batch', body);
 
 // Mirror of internal/rules Window.InWindow — kept byte-for-byte in spirit:
 // no window = always; half window / start==end = fail closed; overnight
@@ -1126,11 +1142,11 @@ export const STEPS = ['format', 'catalog', 'auth', 'quota', 'inference', 'protoc
 export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible', 'gemini-openai'] as const;
 
 export const STRATEGY_HINTS: Record<string, string> = {
-  failover: 'try each hop in order until one works',
-  block_round_robin: 'send N requests to one hop, then move to the next. This keeps each account\'s prompt cache in use. N can\'t be more than the hop\'s request limit.',
-  true_round_robin: 'pick a hop at random for each request. It evens out over time, but the prompt cache isn\'t reused and the same hop can come up several times in a row.',
-  sticky_last_good: 'stay on the last hop that worked, and start over after sticky_idle_s seconds with no requests',
-  least_used: 'send each request to the hop with the least recent traffic',
+  failover: 'try each model in order until one works',
+  block_round_robin: 'send N requests to one model, then move to the next. This keeps each provider\'s prompt cache in use. N can\'t be more than the provider\'s request limit.',
+  true_round_robin: 'pick a model at random for each request. It evens out over time, but the prompt cache isn\'t reused and the same model can come up several times in a row.',
+  sticky_last_good: 'stay on the last model that worked, and start over after a set time with no requests',
+  least_used: 'send each request to the model with the least recent traffic',
 };
 
 // ── notifications (the bell) ──
@@ -1163,4 +1179,6 @@ export const revokeDashboardSession = (id: string) => del(`/admin/settings/sessi
 export const revokeAllDashboardSessions = () => post('/admin/settings/sessions/revoke-all');
 export const getBackupStatus = () => get<BackupStatus>('/admin/backups');
 export const runBackup = () => post('/admin/backups');
+export type UpdateStatus = { enabled: boolean; current: string; latest: string; available: boolean; url: string; checked_at: string };
+export const getUpdate = () => get<UpdateStatus>('/admin/update');
 export const getDiagnostics = () => get<SystemDiagnostics>('/admin/settings/diagnostics');

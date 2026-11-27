@@ -481,7 +481,7 @@ func TestTokenPlaintextShownOnce(t *testing.T) {
 	if code != http.StatusConflict {
 		t.Fatalf("duplicate token name should return 409 without replacing it, got %d: %s", code, resp)
 	}
-	if countTable(t, h, "client_tokens") != 3 { // seeded hermes + admin + first created token
+	if countTable(t, h, "client_tokens") != 3 { // seeded my-app + admin + first created token
 		t.Fatalf("duplicate token attempt changed token row count")
 	}
 }

@@ -8,8 +8,8 @@ const BASE = process.env.EZLLM_SHOT_BASE || 'http://127.0.0.1:20199';
 // to EZLLM_SHOT_PW (see shot-dash-columns.mjs).
 const PW = process.env.EZLLM_SHOT_PW;
 if (!PW) throw new Error('set EZLLM_SHOT_PW (and EZLLM_DASHBOARD_PASSWORD on the instance)');
-const shots = '/home/calypso/.hermes/cache/scratch/ezllm-verify/shots';
-const TARGET = process.env.EZLLM_SHOT_ACCOUNT || 'space-stationine';
+const shots = process.env.SHOTS_DIR ?? 'shots';
+const TARGET = process.env.EZLLM_SHOT_ACCOUNT || 'globex';
 
 const b = await chromium.launch();
 const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });

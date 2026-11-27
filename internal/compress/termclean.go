@@ -45,9 +45,17 @@ func ansi(msgs []any, opts map[string]any) []any {
 
 var (
 	oscSeq     = regexp.MustCompile("\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)") // window title, hyperlinks
+	eraseLine  = regexp.MustCompile("\x1b\\[2K")                            // clear the whole line
+	eraseToEOL = regexp.MustCompile("\x1b\\[0?K")                           // clear to end of line
 	csiSeq     = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")             // colour, cursor, erase
 	charsetSeq = regexp.MustCompile("\x1b[()*+][0-9A-Za-z]")                // charset designation
 	escSeq     = regexp.MustCompile("\x1b[@-Z\\\\-_]")                      // other two-byte escapes
+)
+
+// Private-use runes stand in for the erase sequences while a line replays.
+const (
+	markEraseLine  = '\uE000'
+	markEraseToEOL = '\uE001'
 )
 
 // renderTerminal strips escape sequences, then replays each line's carriage
@@ -56,15 +64,20 @@ var (
 // ones (a shorter overwrite leaves the old tail visible, as on screen).
 func renderTerminal(text string) string {
 	text = oscSeq.ReplaceAllString(text, "")
+	// Erase-line sequences act on what the line already shows, so they are
+	// replayed with \r and \b below instead of being stripped first: progress
+	// bars redraw with "\r\x1b[2K", and stripping it left the old bar's tail.
+	text = eraseLine.ReplaceAllString(text, string(markEraseLine))
+	text = eraseToEOL.ReplaceAllString(text, string(markEraseToEOL))
 	text = csiSeq.ReplaceAllString(text, "")
 	text = charsetSeq.ReplaceAllString(text, "")
 	text = escSeq.ReplaceAllString(text, "")
-	if !strings.ContainsAny(text, "\r\b") {
+	if !strings.ContainsAny(text, "\r\b"+string(markEraseLine)+string(markEraseToEOL)) {
 		return text
 	}
 	lines := strings.Split(text, "\n")
 	for i, ln := range lines {
-		if !strings.ContainsAny(ln, "\r\b") {
+		if !strings.ContainsAny(ln, "\r\b"+string(markEraseLine)+string(markEraseToEOL)) {
 			continue
 		}
 		var buf []rune
@@ -77,6 +90,15 @@ func renderTerminal(text string) string {
 				if cur > 0 {
 					cur--
 				}
+			case markEraseLine:
+				// The whole line goes blank; the cursor stays. Blanks after
+				// the cursor show as nothing, so the line ends there.
+				buf = buf[:min(cur, len(buf))]
+				for j := range buf {
+					buf[j] = ' '
+				}
+			case markEraseToEOL:
+				buf = buf[:min(cur, len(buf))]
 			default:
 				if cur < len(buf) {
 					buf[cur] = r

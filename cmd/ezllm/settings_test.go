@@ -17,7 +17,7 @@ import (
 )
 
 func TestSettingsExplicitYAMLAndEnvironmentPrecedence(t *testing.T) {
-	for _, name := range []string{"EZLLM_USAGE_TZ", "EZLLM_PRICE_REFRESH", "EZLLM_COMBO_AUTOPROBE", "EZLLM_TRANSLATION_ENABLED"} {
+	for _, name := range []string{"EZLLM_USAGE_TZ", "EZLLM_PRICE_REFRESH", "EZLLM_UPDATE_CHECK", "EZLLM_COMBO_AUTOPROBE", "EZLLM_TRANSLATION_ENABLED"} {
 		t.Setenv(name, "")
 	}
 	root := t.TempDir()
@@ -157,5 +157,31 @@ func TestSettingsOnChangeSeesTheNewUsageTimezone(t *testing.T) {
 	}
 	if seen != "Asia/Tokyo" {
 		t.Fatalf("OnChange saw %q, want Asia/Tokyo", seen)
+	}
+}
+
+func TestUpdateCheckEnvironmentSwitch(t *testing.T) {
+	db, err := store.Open(context.Background(), store.Options{Path: filepath.Join(t.TempDir(), "db.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	file := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for value, want := range map[string]bool{"": true, "on": true, "off": false} {
+		t.Setenv("EZLLM_UPDATE_CHECK", value)
+		m, err := operatorSettings(context.Background(), db, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f := m.View().Fields["update_check"]; m.Current().UpdateCheck != want || f.Editable != (value == "") {
+			t.Errorf("EZLLM_UPDATE_CHECK=%q: on=%v field=%+v", value, m.Current().UpdateCheck, f)
+		}
 	}
 }

@@ -3,21 +3,24 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { motion } from 'motion/react';
 import {
   ApiError, AuthError, del, get, listBridges,
-  modelRules, patch, post, postKeyTestStream, setModelPin,
+  modelRules, patch, post, postKeyTestStream, releaseModelVerdict, setModelPin,
   setPrice, deletePrice, startSweep, stopSweep, sweepStatus,
   KINDS, STEPS,
   type Account, type ApiErrorDetail, type Bridge, type KeyRow, type ModelRule, type ModelRow, type Price, type SweepStatus, type TestResult, type TestStep,
 } from '../utils/api';
 import { useSearchParams } from 'react-router-dom';
-import { Chip, ConfirmModal, CopyButton, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, Mono } from '../components/ui';
+import { ADVANCED_KEY, Advanced, Chip, ConfirmModal, Modal, SecretInput, SectionLabel, Segmented, Skeleton, SkeletonCards, Spinner, Toggle, btn, cx, inputCls, labelCls, relTime, untilTime, Mono } from '../components/ui';
 import { Collapse, Stagger, StaggerItem } from '../components/motion';
 import { bridgeUpdateText, fmtMoney, nfmt, UPDATE_TONE } from '../utils/lib';
 import { accountIssues, type Issue } from '../utils/health';
+import { type Cooldown, useCooldowns } from '../utils/cooldowns';
+import { ParkedPill } from '../components/Parked';
+import { SignInCommands } from '../components/Bridges';
+import { PROVIDER_PRESETS, addProviderWithKey, modelStatus, slugify } from '../utils/providers';
+import { apiLabel as apiName } from '../utils/words';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-const slugify = (s: string) =>
-  s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63);
 
 function ErrBox({ e, onDismiss }: { e: ApiErrorDetail | null; onDismiss: () => void }) {
   if (!e) return null;
@@ -109,97 +112,6 @@ const emptyDraft: Draft = {
   accountId: '',
 };
 
-const PROVIDER_PRESETS: Record<string, {
-  label: string; kind: string; baseURL?: string; sessionHeader?: boolean;
-  // accountURL builds the base URL from an account ID the operator supplies.
-  // Cloudflare is the only one that needs it: the account ID lives INSIDE the
-  // endpoint path.
-  accountURL?: (id: string) => string;
-  // keyHint is the placeholder/one-liner for credentials that are NOT a
-  // pasteable API key: a browser cookie pair, a session JSON, an OAuth
-  // sessionKey. Shown under the key field when this preset is selected.
-  keyHint?: string;
-  // multilineKey swaps the masked single-line input for a textarea. Cookie
-  // jars arrive as several lines (or one long semicolon header) and simply do
-  // not fit one input row — the field must hold them before the backend can
-  // extract what it needs.
-  multilineKey?: boolean;
-  // bridge names an in-process subscription bridge (GET /admin/bridges). The
-  // server supplies its key, so the key field becomes a status panel.
-  bridge?: Bridge['id'];
-  usageConvention?: string;
-}> = {
-  // Subscription bridges: the official CLI behind a loopback surface. No key to
-  // paste — docs/claude-bridge-runbook.md, docs/codex-bridge-runbook.md,
-  // docs/agy-bridge-runbook.md.
-  'claude-sub': {
-    label: 'Claude Pro/Max (bridge)', kind: 'anthropic-compatible', baseURL: 'http://127.0.0.1:8790/v1',
-    bridge: 'claude-sub', usageConvention: 'anthropic',
-  },
-  'chatgpt-sub': {
-    label: 'ChatGPT Plus/Pro (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8791/v1',
-    bridge: 'chatgpt-sub',
-  },
-  'antigravity-sub': {
-    label: 'Google Antigravity (bridge)', kind: 'openai-compatible', baseURL: 'http://127.0.0.1:8792/v1',
-    bridge: 'antigravity-sub',
-  },
-  // The CLI bridge is its own provider kind, listed under GitHub Copilot.
-  'copilot-sub': {
-    label: 'GitHub Copilot (bridge)', kind: 'copilot-bridge', baseURL: 'http://127.0.0.1:8793/v1',
-    bridge: 'copilot-sub',
-  },
-  'claude-platform': { label: 'Claude Platform', kind: 'anthropic-compatible', baseURL: 'https://api.anthropic.com' },
-  // Web-protocol providers: no API key — credentials are browser sessions.
-  // The sentinel base URL is rewritten to the in-process bridge at request
-  // time (docs/claude-web-runbook.md, docs/gemini-web-runbook.md).
-  'claude-web': {
-    label: 'Claude.ai (web)', kind: 'claude-web', baseURL: 'internal://claudeweb',
-    keyHint: 'Your claude.ai sessionKey cookie, pasted as sessionKey=sk-ant-… (find it in DevTools → Cookies → claude.ai)',
-  },
-  'opencode-go': { label: 'OpenCode Go', kind: 'opencode-go', baseURL: 'https://opencode.ai/zen/go/v1', sessionHeader: true },
-  'xiaomi-mimo-token-plan': { label: 'Xiaomi MiMo token plan', kind: 'openai-compatible', baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1' },
-  'alibaba-model-studio-token-plan': { label: 'Alibaba Cloud Model Studio token plan', kind: 'openai-compatible', baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
-  'commandcode': { label: 'Command Code', kind: 'openai-compatible', baseURL: 'https://api.commandcode.ai/provider/v1' },
-  'deepseek': { label: 'DeepSeek', kind: 'openai-compatible', baseURL: 'https://api.deepseek.com' },
-  'meta-api': { label: 'Meta Model', kind: 'openai-compatible', baseURL: 'https://api.meta.ai/v1', keyHint: 'Meta Model API key (MODEL_API_KEY)' },
-  'groq': { label: 'Groq', kind: 'openai-compatible', baseURL: 'https://api.groq.com/openai/v1' },
-  'tokenrouter': { label: 'TokenRouter', kind: 'openai-compatible', baseURL: 'https://api.tokenrouter.com/v1' },
-  // Vercel AI Gateway: OpenAI-compatible chat + /models discovery over one key,
-  // model ids are `creator/model` (slashes inside the id — splitNamespace
-  // splits on the FIRST slash only, so `vercel/anthropic/claude-opus-5` routes
-  // exactly like tokenrouter's slash-ids already do).
-  'vercel-ai-gateway': { label: 'Vercel AI Gateway', kind: 'openai-compatible', baseURL: 'https://ai-gateway.vercel.sh/v1' },
-  'ollama-cloud': { label: 'Ollama Cloud', kind: 'openai-compatible', baseURL: 'https://ollama.com/v1' },
-  // Local Ollama speaks the OpenAI wire (and /v1/messages) natively — no
-  // adapter. It ignores credentials, but ezllm stores a key per account.
-  'ollama-local': {
-    label: 'Ollama (local)', kind: 'openai-compatible', baseURL: 'http://localhost:11434/v1',
-    keyHint: 'Any value works (for example ollama). A local Ollama ignores the key.',
-  },
-  'gemini': { label: 'Google AI Studio', kind: 'gemini-openai', baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  'gemini-web': {
-    label: 'Google Gemini (web)', kind: 'gemini-web', baseURL: 'internal://geminiweb',
-    multilineKey: true,
-    keyHint: 'Paste the whole cookie header (all cookies, separated by semicolons). ezllm keeps __Secure-1PSID and __Secure-1PSIDTS. Two lines also work. Only use a test Google account.',
-  },
-  'openai': { label: 'OpenAI Platform', kind: 'openai-compatible', baseURL: 'https://api.openai.com/v1' },
-  // NVIDIA NIM — standard OpenAI-compatible chat, model ids are bare
-  // (e.g. meta/llama-3.3-70b-instruct), so splitNamespace routes them like
-  // tokenrouter's slash-ids already do.
-  'nvidia-nim': { label: 'NVIDIA NIM', kind: 'openai-compatible', baseURL: 'https://integrate.api.nvidia.com/v1' },
-  // Cloudflare Workers AI — the account ID composes the base URL. Workers AI
-  // serves the whole OpenAI family under /accounts/{id}/ai/v1: /chat/completions,
-  // /responses and an Anthropic-compatible /messages, so nothing here needs a
-  // new protocol. Model ids carry their own slashes (@cf/moonshotai/kimi-k2.6).
-  'cloudflare-workers-ai': {
-    label: 'Cloudflare Workers AI', kind: 'openai-compatible',
-    accountURL: (id) => `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(id.trim())}/ai/v1`,
-  },
-  'openrouter': { label: 'OpenRouter', kind: 'openai-compatible', baseURL: 'https://openrouter.ai/api/v1' },
-  'openai-compatible': { label: 'OpenAI-compatible', kind: 'openai-compatible' },
-  'anthropic-compatible': { label: 'Anthropic-compatible', kind: 'anthropic-compatible' },
-};
 const PRESET_IDS = Object.keys(PROVIDER_PRESETS);
 // The add-provider dropdown reads in label order (babe's ask): a copy, so the
 // insertion order above stays the documented canonical list.
@@ -258,23 +170,44 @@ const EXTRAS = {
   },
 } satisfies Record<string, Extra>;
 
+// The backend picks each reader by the base URL's host (quota.go), so these do
+// too: a provider added under its own namespace still gets its field.
+function hostnameOf(url: string): string {
+  try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
+}
+const isLoopback = (host: string) => host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+
 function extraForPreset(presetID: string, baseURL: string): Extra | null {
-  if (presetID === 'tokenrouter') return EXTRAS.tokenrouter;
-  if (presetID === 'anthropic-compatible' && baseURL.includes('api.anthropic.com')) return EXTRAS.console;
-  if (presetID === 'openai') return EXTRAS.openai;
-  if (presetID === 'commandcode') return EXTRAS.commandcode;
   if (presetID === 'claude-sub') return EXTRAS.claudeSub;
-  return null;
+  if (presetID === 'commandcode') return EXTRAS.commandcode;
+  return extraForHost(hostnameOf(baseURL), presetID === 'anthropic-compatible' || presetID === 'claude-platform');
 }
 
 function extraForAccount(a: Account): Extra | null {
-  const url = a.base_url ?? '';
-  if (a.kind === 'openai-compatible' && a.namespace === 'tokenrouter') return EXTRAS.tokenrouter;
-  if (a.kind === 'anthropic-compatible' && url.includes('api.anthropic.com')) return EXTRAS.console;
-  if (a.namespace === 'claude-sub') return EXTRAS.claudeSub;
-  if (a.kind === 'openai-compatible' && a.namespace === 'openai') return EXTRAS.openai;
-  if (a.kind === 'openai-compatible' && url.includes('api.commandcode.ai')) return EXTRAS.commandcode;
+  const host = hostnameOf(a.base_url ?? "");
+  if (a.kind === 'anthropic-compatible' && isLoopback(host)) return EXTRAS.claudeSub;
+  return extraForHost(host, a.kind === 'anthropic-compatible');
+}
+
+function extraForHost(host: string, anthropic: boolean): Extra | null {
+  if (anthropic) return host === 'api.anthropic.com' ? EXTRAS.console : null;
+  if (host === 'api.tokenrouter.com') return EXTRAS.tokenrouter;
+  if (host === 'api.openai.com') return EXTRAS.openai;
+  if (host === 'api.commandcode.ai') return EXTRAS.commandcode;
   return null;
+}
+
+// parseCustomHeaders reads the advanced headers field: a JSON object whose
+// values are strings, or nothing. A clear message beats the server's 400 (or a
+// raw JSON parse error) after the wizard has started.
+function parseCustomHeaders(raw: string): Record<string, string> | null {
+  if (!raw.trim()) return null;
+  let v: unknown;
+  try { v = JSON.parse(raw); } catch { throw new Error('Custom headers must be JSON, for example {"x-team":"ops"}.'); }
+  if (!v || typeof v !== 'object' || Array.isArray(v) || Object.values(v).some((x) => typeof x !== 'string')) {
+    throw new Error('Custom headers must be a JSON object of text values, for example {"x-team":"ops"}.');
+  }
+  return v as Record<string, string>;
 }
 
 function ExtraCredentialField({ extra, id, value, onChange, edit, isSet, expiresAt }: {
@@ -363,7 +296,7 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
   return (
     <div className="rounded-lg border border-line bg-raised/60 p-4">
       <div className="flex items-center justify-between gap-3">
-        <SectionLabel>API keys</SectionLabel>
+        <SectionLabel>Provider keys</SectionLabel>
         {!form && <button type="button" className={cx(btn.base, btn.ghost, '!h-7 !px-3 !text-[12px]')} onClick={() => begin(null)}>Add key</button>}
       </div>
       {account.keys.length === 0 ? (
@@ -405,16 +338,16 @@ function KeyManager({ account, onChanged, onBusy, onDirty }: {
             </p>
           ) : (
             <div>
-              <label className={labelCls} htmlFor="km-secret">{multiline ? 'Session cookies' : 'API key'}</label>
+              <label className={labelCls} htmlFor="km-secret">{multiline ? 'Session cookies' : 'Provider key'}</label>
               <SecretInput id="km-secret" value={secret} onChange={setSecret} multiline={multiline} disabled={busy}
-                placeholder={preset?.keyHint ?? 'Paste the new provider API key'}
+                placeholder={preset?.keyHint ?? 'Paste the new key from your provider'}
                 onEnter={() => void submit()} />
               {preset?.keyHint && <p className="mt-1 text-[12px] text-mute">{preset.keyHint}</p>}
             </div>
           )}
           <div className="flex items-center gap-3">
-            <Toggle checked={skip} onChange={setSkip} label="skip inference probe" disabled={busy} />
-            <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
+            <Toggle checked={skip} onChange={setSkip} label="skip the test request" disabled={busy} />
+            <span className="text-[13px] text-dim">Skip the test request <span className="text-mute">(saves a few tokens)</span></span>
           </div>
           {(steps != null) && (
             <div className="rounded-lg border border-line bg-surface px-4 py-3">
@@ -453,16 +386,18 @@ function CookieExpiry({ at }: { at?: string }) {
 }
 
 function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
-  const rows: Array<[string, number]> = [];
-  if (quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
-  if (quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
-  if (quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
+  const groups = quota.groups ?? [];
+  const grouped = groups.length > 0;
+  const rows: Array<[string, number]> = groups.map((g) => [g.name, g.percent]);
+  if (!grouped && quota.percent_rolling != null) rows.push(['rolling', quota.percent_rolling]);
+  if (!grouped && quota.percent_weekly != null) rows.push(['weekly', quota.percent_weekly]);
+  if (!grouped && quota.percent_monthly != null) rows.push(['monthly', quota.percent_monthly]);
   if (rows.length > 0 && rows.every(([, v]) => typeof v === 'number')) {
     return (
       <div className="space-y-1.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-center gap-2.5">
-            <span className="w-14 text-[11px] text-mute">{k}</span>
+            <span className={cx('text-[11px] text-mute', grouped ? 'w-36 flex-none truncate' : 'w-14')}>{k}</span>
             <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-shade">
               {/* The bar DRAWS IN from zero: a quota reading is a live probe
                   of the provider, and a bar that springs to its width says
@@ -477,6 +412,7 @@ function QuotaBars({ quota }: { quota: NonNullable<Account['quota']> }) {
               />
             </div>
             <span className="tnum w-10 text-right font-mono text-[12px] text-dim">{Math.round(v)}%</span>
+            {grouped && <span className="w-24 flex-none text-[11px] text-mute">{groups.find((g) => g.name === k)?.resets_at ? `resets ${untilTime(groups.find((g) => g.name === k)?.resets_at)}` : ''}</span>}
           </div>
         ))}
       </div>
@@ -525,7 +461,7 @@ function QuotaSummary({ quota }: { quota: Account['quota'] }) {
     // The tightest window speaks for the provider: it is the one that refuses first.
     const [k, v] = pcts.reduce((m, r) => (r[1] > m[1] ? r : m));
     return (
-      <div className="flex items-center gap-2" title={pcts.map(([n, x]) => `${n} ${Math.round(x)}%`).join(' · ')}>
+      <div className="flex items-center gap-2" title={(quota.groups?.length ? quota.groups.map((g): [string, number] => [g.name, g.percent]) : pcts).map(([n, x]) => `${n} ${Math.round(x)}%`).join(' · ')}>
         <span className="w-14 flex-none text-[12px] text-mute">{k}</span>
         <div className="h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-shade">
           <motion.div
@@ -592,7 +528,6 @@ function IconButton({ label, tone, busy, disabled, onClick, children }: {
   );
 }
 
-const REPO_DOCS = 'https://github.com/c4lyp5o/ezllm/blob/master/';
 const statusText = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 
 // BridgeUpdateNote is the host updater's latest report on this bridge's CLI:
@@ -609,62 +544,19 @@ function BridgeUpdateNote({ update }: { update: NonNullable<Bridge['update']> })
   );
 }
 
-// Sign-in commands per bridge, matching the README: every bridge logs in to its
-// own ~/.<bridge>-sub folder with the binary the bridge mounts (the updater's
-// layout; the runbook covers other install paths).
-const BRIDGE_SIGN_IN: Record<string, { login: string[]; check: string; note: string }> = {
-  'claude-sub': {
-    login: ['CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth login'],
-    check: 'CLAUDE_CONFIG_DIR=~/.claude-sub ~/.local/share/claude-bridge/current/claude auth status',
-    note: 'Opens a browser so you can sign in with the account that has the Claude plan.',
-  },
-  'chatgpt-sub': {
-    login: ['CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login --device-auth'],
-    check: 'CODEX_HOME=~/.codex-sub ~/.local/share/codex-bridge/current/bin/codex login status',
-    note: 'Prints a URL and a code. Open the URL, enter the code and approve it with your ChatGPT account.',
-  },
-  'antigravity-sub': {
-    login: ['mkdir -p ~/.agy-sub && chmod 700 ~/.agy-sub', 'env -u DBUS_SESSION_BUS_ADDRESS HOME=$HOME/.agy-sub ~/.local/share/agy-bridge/current/agy'],
-    check: 'ls ~/.agy-sub/.gemini/antigravity-cli/antigravity-oauth-token',
-    note: 'Opens the CLI. Sign in, send one prompt, then type /exit. Unsetting D-Bus makes it save the login to a file the container can read.',
-  },
-  'copilot-sub': {
-    login: ['env -u DBUS_SESSION_BUS_ADDRESS COPILOT_HOME=~/.copilot-sub ~/.local/share/copilot-bridge/current/copilot login --device-code'],
-    check: 'ls ~/.copilot-sub/config.json',
-    note: 'Prints a URL and a code. Open the URL, enter the code and approve it with the GitHub account that has Copilot.',
-  },
-};
-
-function SignInCommands({ id }: { id: string }) {
-  const s = BRIDGE_SIGN_IN[id];
-  if (!s) return null;
-  const line = (cmd: string) => (
-    <div key={cmd} className="flex items-start gap-2">
-      <code className="font-code min-w-0 flex-1 break-all rounded bg-shade px-2 py-1 text-[12px] text-dim">{cmd}</code>
-      <CopyButton text={cmd} label="Copy" />
-    </div>
-  );
-  return (
-    <div className="space-y-1.5 text-[12px]">
-      <p className="text-mute">Sign in on the host (once):</p>
-      {s.login.map(line)}
-      <p className="text-mute">{s.note} Check it worked:</p>
-      {line(s.check)}
-    </div>
-  );
-}
-
 // BridgePanel stands in for the key field on a subscription preset: running →
 // what the bridge reported at boot and "no key needed"; off → the exact steps
 // that turn it on, with the runbook one click away.
 function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: boolean }) {
   if (loading) return <div className="flex items-center gap-2 text-[13px] text-mute"><Spinner /> Checking the bridge…</div>;
   if (!bridge) return null;
-  const runbook = (
-    <a className="text-ink underline underline-offset-2" href={REPO_DOCS + bridge.runbook} target="_blank" rel="noreferrer">
-      {bridge.runbook}
+  const doc = (path: string) => (
+    <a className="text-ink underline underline-offset-2" href={bridge.docs + path} target="_blank" rel="noreferrer">
+      {path}
     </a>
   );
+  const runbook = doc(bridge.runbook);
+  const setup = doc(bridge.setup);
   if (bridge.enabled) {
     const s = bridge.status ?? {};
     const facts = ([
@@ -694,9 +586,9 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
         )}
         {bridge.update && <BridgeUpdateNote update={bridge.update} />}
         {toolsDisabled && <p className="text-[12px] text-warn">Client tool calls are unavailable on this bridge. See {runbook} for the reason and options.</p>}
-        {loggedOut && <p className="text-[12px] text-warn">The CLI isn't logged in, so the key test will fail until you log in again ({runbook}).</p>}
+        {loggedOut && <p className="text-[12px] text-warn">The CLI isn't logged in, so the key test will fail until you log in again ({setup}).</p>}
         {loggedOut && <SignInCommands id={bridge.id} />}
-        <p className="text-[12px] text-mute">Status was recorded at startup. Setup and troubleshooting: {runbook}</p>
+        <p className="text-[12px] text-mute">Status was recorded at startup. Setup: {setup} · reference: {runbook}</p>
         <p className="text-[12px] text-mute">Save &amp; validate uses the bridge&apos;s own key. Set a cap under Rules before you let agents use it.</p>
       </div>
     );
@@ -705,13 +597,13 @@ function BridgePanel({ bridge, loading }: { bridge: Bridge | null; loading: bool
     <div className="space-y-2 rounded-lg border border-warn/40 bg-warn-dim/40 px-4 py-3 text-[13px]">
       <p className="flex items-center gap-2 text-warn"><span className="size-1.5 rounded-full bg-warn" /> This bridge is not running on this server</p>
       <ol className="list-decimal space-y-1 pl-5 text-dim">
-        <li>On the host, install the official CLI and sign it in to its own folder:
+        <li>On the host, install the official CLI, copy it into the bridge folder (see the step-by-step page) and sign it in to its own folder:
           <div className="mt-1.5"><SignInCommands id={bridge.id} /></div>
         </li>
-        <li>In <Mono>compose.yml</Mono>, uncomment the bridge&apos;s two mounts and set <Mono>{bridge.env}: &quot;on&quot;</Mono>.</li>
-        <li>Run <Mono>docker compose up -d</Mono>, then reopen this dialog. If ezllm does not start, check <Mono>docker compose logs ezllm</Mono>.</li>
+        <li>Set <Mono>{bridge.env}</Mono> to <Mono>on</Mono> and give ezllm the two folders. The step-by-step page has the exact lines for Docker Compose, <Mono>docker run</Mono> and the ezllm binary.</li>
+        <li>Start ezllm again, then reopen this dialog. If ezllm does not start, check its log, for example <Mono>docker compose logs ezllm</Mono>.</li>
       </ol>
-      <p className="text-[12px] text-mute">Step-by-step: {runbook}</p>
+      <p className="text-[12px] text-mute">Step-by-step: {setup}</p>
     </div>
   );
 }
@@ -733,8 +625,10 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
     listBridges().then(setBridges).catch(() => setBridges([]));
   }, [open]);
 
+  // Reset on close, not on open: a reset that runs after the dialog shows can
+  // land after the first choice and wipe it (a bridge's prefilled name).
   useEffect(() => {
-    if (open) {
+    if (!open) {
       setD(emptyDraft); setBusy(false); setResult(null); setLiveSteps(null); setErr(null);
     }
   }, [open]);
@@ -746,9 +640,8 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   const saveAndValidate = async () => {
     setBusy(true); setErr(null); setResult(null);
-    let createdAccountID: number | null = null;
     try {
-      const customHeaders = d.customHeaders.trim() ? JSON.parse(d.customHeaders) as Record<string, unknown> : null;
+      const customHeaders = parseCustomHeaders(d.customHeaders);
       const preset = PROVIDER_PRESETS[d.preset];
       const payload = {
         name: d.name.trim(), namespace: d.namespace.trim(), kind: preset.kind,
@@ -762,29 +655,18 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
         // No quota_mode / caps here on purpose: quota is always probed, and
         // cap_window + cap_tokens live on Rules (per model, enforced in-flight).
       };
-      const account = await post<Account>('/admin/accounts', payload);
-      createdAccountID = account.id;
       // One credential source: a pasted key, or a running bridge (the server
       // supplies its secret — no credential rides in this body).
       const credential = d.apiKey.trim()
         ? { api_key: d.apiKey.trim() }
         : { bridge: bridgeID ?? '' };
-      // Streamed key test: every step lands in liveSteps as the server
-      // records it (NDJSON), so the chain moves. Falls back to the one-shot
-      // response shape when the server does not stream.
-      const response = await postKeyTestStream<{ key: KeyRow; test: TestResult }>(
-        `/admin/accounts/${account.id}/keys`,
+      const response = await addProviderWithKey(payload,
         { label: d.keyLabel.trim() || 'primary', ...credential, skip_inference: d.skipInference },
-        (step) => setLiveSteps((prev) => [...(prev ?? []), step]),
-      );
+        (step) => setLiveSteps((prev) => [...(prev ?? []), step]));
       setResult(response.test);
       onDone();
       onClose();
     } catch (e) {
-      if (createdAccountID != null) {
-        try { await del(`/admin/accounts/${createdAccountID}?force=true`); }
-        catch { /* preserve the original validation failure; user can resolve the account conflict in the UI */ }
-      }
       if (e instanceof ApiError) setErr(e.detail);
       else setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : String(e) });
     } finally { setBusy(false); }
@@ -810,7 +692,7 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
 
   return (
     <Modal open={open} onClose={onClose} wide title="Add provider"
-      subtitle="Adds the provider and tests its API key before saving it."
+      subtitle="Adds the provider and tests its key before saving it."
       busy={busy} dirty={dirty} onSubmit={() => { if (valid) void saveAndValidate(); }}
       footer={(close) => (
         <>
@@ -831,14 +713,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
               }} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ap-ns">Namespace</label>
-            <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opengo" spellCheck={false}
-              onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
-            <p className="mt-1 text-[12px] text-mute">lowercase slug used in model ids</p>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
             <label className={labelCls} htmlFor="ap-kind">Provider type</label>
             <select id="ap-kind" className={inputCls} value={d.preset} onChange={(e) => {
               const presetID = e.target.value;
@@ -854,11 +728,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
             }}>
               {sortedPresetIDs().map((presetID) => <option key={presetID} value={presetID}>{PROVIDER_PRESETS[presetID].label}</option>)}
             </select>
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ap-delay">Probe delay (ms)</label>
-            <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
-              onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
           </div>
         </div>
         {presetAccountID ? (
@@ -899,30 +768,54 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
         )}
         {bridgeID && <BridgePanel bridge={bridge} loading={bridges === null} />}
-        <div className={cx('grid gap-4 sm:grid-cols-2', bridgeID && 'hidden')}>
-          <div className="sm:col-span-1">
-            <label className={labelCls} htmlFor="ap-key">API key</label>
-            <SecretInput id="ap-key" value={d.apiKey} onChange={(v) => set('apiKey', v)}
-              multiline={!!PROVIDER_PRESETS[d.preset]?.multilineKey}
-              placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste provider API key'} />
-            {PROVIDER_PRESETS[d.preset]?.keyHint && (
-              <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
-            )}
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ap-kl">Key label</label>
-            <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
-          </div>
+        <div className={cx(bridgeID && 'hidden')}>
+          <label className={labelCls} htmlFor="ap-key">Provider key</label>
+          <SecretInput id="ap-key" value={d.apiKey} onChange={(v) => set('apiKey', v)}
+            multiline={!!PROVIDER_PRESETS[d.preset]?.multilineKey}
+            placeholder={PROVIDER_PRESETS[d.preset]?.keyHint ?? 'Paste the key from your provider'} />
+          {PROVIDER_PRESETS[d.preset]?.keyHint && (
+            <p className="mt-1 text-[12px] text-mute">{PROVIDER_PRESETS[d.preset].keyHint}</p>
+          )}
         </div>
         {extra && <ExtraCredentialField extra={extra} id="ap-extra" value={d.managementKey} onChange={(v) => set('managementKey', v)} />}
-        <div>
-          <label className={labelCls} htmlFor="ap-notes">Notes</label>
-          <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
-        </div>
-        <div className="flex items-center gap-3">
-          <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip inference probe" />
-          <span className="text-[13px] text-dim">Skip inference probe <span className="text-mute">(saves a token spend)</span></span>
-        </div>
+        <Advanced id="add-provider" forceOpen={d.name.trim() !== '' && !/^[a-z0-9][a-z0-9._-]{0,62}$/.test(d.namespace.trim())} hint={d.namespace ? `provider ID ${d.namespace}` : undefined}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="ap-ns">Provider ID</label>
+              <input id="ap-ns" className={cx(inputCls, 'font-mono')} value={d.namespace} placeholder="opencode" spellCheck={false}
+                onChange={(e) => setD((p) => ({ ...p, namespace: slugify(e.target.value), nsTouched: true }))} />
+              <p className="mt-1 text-[12px] text-mute">The start of this provider's model IDs, as in <Mono>{d.namespace || 'acme'}/model</Mono>. Fixed once saved.</p>
+            </div>
+            <div className={cx(bridgeID && 'hidden')}>
+              <label className={labelCls} htmlFor="ap-kl">Key label</label>
+              <input id="ap-kl" className={inputCls} value={d.keyLabel} onChange={(e) => set('keyLabel', e.target.value)} placeholder="primary" />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="ap-delay">Pause between tests (ms)</label>
+              <input id="ap-delay" type="number" min={0} className={cx(inputCls, 'font-mono tabular-nums')} value={d.probe_delay_ms}
+                onChange={(e) => set('probe_delay_ms', Number(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="ap-notes">Notes</label>
+              <input id="ap-notes" className={inputCls} value={d.notes} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Toggle checked={d.skipInference} onChange={(v) => set('skipInference', v)} label="skip the test request" />
+            <span className="text-[13px] text-dim">Skip the test request <span className="text-mute">(saves a few tokens)</span></span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
+            <span className="text-[13px] text-dim">Send a session header upstream</span>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
+            <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[13px]')}
+              placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
+          </div>
+        </Advanced>
         <div ref={validationRef} className="space-y-3">
           <div className="rounded-lg border border-line bg-raised/60 px-4 py-3">
             <SectionLabel className="mb-2">Validation</SectionLabel>
@@ -931,20 +824,6 @@ function AddProviderModal({ open, onClose, onDone }: { open: boolean; onClose: (
           </div>
           <ErrBox e={err} onDismiss={() => setErr(null)} />
         </div>
-        <details className="rounded-lg border border-line bg-raised/40 px-4 py-3">
-          <summary className="cursor-pointer text-[13px] font-medium text-dim">Advanced settings</summary>
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <Toggle checked={d.requiresSessionHeader} onChange={(v) => set('requiresSessionHeader', v)} label="requires_session_header" />
-              <span className="text-[13px] text-dim">requires session header upstream</span>
-            </div>
-            <div>
-              <label className={labelCls} htmlFor="ap-cH">Custom headers (JSON)</label>
-              <textarea id="ap-cH" rows={3} spellCheck={false} className={cx(inputCls, 'font-mono text-[13px]')}
-                placeholder={'{"x-team":"ops"}'} value={d.customHeaders} onChange={(e) => set('customHeaders', e.target.value)} />
-            </div>
-          </div>
-        </details>
       </div>
     </Modal>
   );
@@ -1032,7 +911,7 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
         <Segmented<'settings' | 'keys'> label="Edit section"
           options={[
             { key: 'settings', label: 'Settings' },
-            { key: 'keys', label: `Keys · ${account.keys.length}`, title: 'Add, replace or review API keys' },
+            { key: 'keys', label: `Keys · ${account.keys.length}`, title: 'Add, replace or review provider keys' },
           ]}
           value={tab} onChange={setTab} />
       </div>
@@ -1046,26 +925,20 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
             <input id="ea-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className={labelCls} htmlFor="ea-ns">Namespace</label>
+            <label className={labelCls} htmlFor="ea-ns">Provider ID</label>
             <input id="ea-ns" className={cx(inputCls, 'font-mono')} value={account.namespace} readOnly disabled />
-            <p className="mt-1 text-[12px] text-mute">the prefix in model ids; fixed once created</p>
+            <p className="mt-1 text-[12px] text-mute">the start of this provider's model IDs; fixed once saved</p>
           </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className={labelCls} htmlFor="ea-kind">Kind</label>
+            <label className={labelCls} htmlFor="ea-kind">Provider type</label>
             <select id="ea-kind" className={inputCls} value={kind} disabled={kindLocked} onChange={(e) => setKind(e.target.value)}>
               {/* A kind outside the list (gemini-web, github-copilot, …) must still
                   show as itself, not as whichever option sorts first. */}
               {((KINDS as readonly string[]).includes(kind) ? [...KINDS] : [kind, ...KINDS]).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
             {kindLocked && <p className="mt-1 text-[12px] text-mute">fixed while the provider has keys or models</p>}
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="ea-delay">Probe delay (ms)</label>
-            <input id="ea-delay" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !delayOk && 'border-bad')}
-              value={probeDelay} onChange={(e) => setProbeDelay(e.target.value)} />
-            {!delayOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
           </div>
         </div>
         <div>
@@ -1111,11 +984,19 @@ function EditAccountModal({ account, initialTab = 'settings', onClose, onSaved }
           </div>
           {rateN > 0 ? (
             <p className="mt-2 text-[12px] text-accent">
-              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow}. A combo with another hop
+              {rateN} request{rateN === 1 ? '' : 's'} per {rateWindow}. A combo with another model
               will move on to it instead of failing.
             </p>
           ) : null}
         </div>
+        <Advanced id="edit-provider">
+          <div className="sm:w-1/2">
+            <label className={labelCls} htmlFor="ea-delay">Pause between tests (ms)</label>
+            <input id="ea-delay" inputMode="numeric" className={cx(inputCls, 'font-mono tabular-nums', !delayOk && 'border-bad')}
+              value={probeDelay} onChange={(e) => setProbeDelay(e.target.value)} />
+            {!delayOk && <p className="mt-1 text-[12px] text-bad">a whole number, 0 or more</p>}
+          </div>
+        </Advanced>
         <ErrBox e={err} onDismiss={() => setErr(null)} />
       </div>
     </Modal>
@@ -1142,9 +1023,13 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   const [sweep, setSweep] = useState<SweepStatus | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
   const [sweepNote, setSweepNote] = useState<string | null>(null);
+  // Per-API results, Force API and Test all live behind this switch.
+  const [advanced, setAdvanced] = useState(() => { try { return localStorage.getItem(ADVANCED_KEY('models')) === '1'; } catch { return false; } });
+  const showAdvanced = (v: boolean) => { setAdvanced(v); try { localStorage.setItem(ADVANCED_KEY('models'), v ? '1' : '0'); } catch { /* private mode */ } };
   // The row whose per-model Test was clicked. Its button keeps the spinner
   // while that single-model sweep runs (the header line carries the clock).
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
 
   const loadModels = useCallback(() => {
     get<ModelRow[]>(`/admin/accounts/${id}/models`)
@@ -1188,8 +1073,8 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       .then((res) => {
         setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
         setSweepNote(res.probing > 0
-          ? `testing ${res.probing} model${res.probing === 1 ? '' : 's'} on ${(res.surfaces ?? []).join(' + ')}`
-          : res.note ?? 'nothing to probe');
+          ? `testing ${res.probing} model${res.probing === 1 ? '' : 's'} on ${(res.surfaces ?? []).map(apiName).join(' + ')}`
+          : res.note ?? 'nothing to test');
         loadModels();
       })
       .catch((e: unknown) => setSweepNote(e instanceof Error ? e.message : 'test all failed'))
@@ -1210,6 +1095,15 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
   // their button is disabled, because a probe write cannot overwrite an
   // operator-curated verdict (server-side, proven by a test) — clicking would
   // only spend quota and change nothing.
+  const releaseOne = (m: ModelRow) => {
+    setReleasingId(m.id);
+    setPinErr(null);
+    releaseModelVerdict(id, m.id)
+      .then(() => loadModels())
+      .catch((e: unknown) => setPinErr(e instanceof Error ? e.message : 'release failed'))
+      .finally(() => setReleasingId(null));
+  };
+
   const testOne = (m: ModelRow) => {
     setSweepBusy(true);
     setTestingId(m.id);
@@ -1219,7 +1113,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       .then((res) => {
         setSweep({ running: res.probing > 0, probing: res.probing, elapsed_s: 0 });
         if (res.probing > 0) {
-          setSweepNote(`testing ${m.id} · ${(res.surfaces ?? []).join(' + ')}`);
+          setSweepNote(`testing ${m.id} · ${(res.surfaces ?? []).map(apiName).join(' + ')}`);
         } else {
           setTestingId(null);
           // probing=0 with only_untested:false means the id is NOT in the
@@ -1252,7 +1146,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
           setPendingForce({ model, pin });
           return;
         }
-        setPinErr(e instanceof Error ? e.message : 'pin failed');
+        setPinErr(e instanceof Error ? e.message : 'could not set the API');
       });
   };
 
@@ -1269,7 +1163,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
     applyPin(m.id, pin, false);
   };
 
-  const untested = models.filter((m) => m.chat == null && m.anthropic == null && m.responses == null).length;
+  const untested = models.filter((m) => modelStatus(m) === 'untested').length;
 
   return (
     // No CSS fade here: the drawer is rendered inside a <Collapse>, which
@@ -1287,10 +1181,14 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
             </span>
           )}
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-[12px] text-mute">
+            <Toggle checked={advanced} onChange={showAdvanced} label="Advanced" />
+            Advanced
+          </label>
           {running ? (
             <BusyButton busy={sweepBusy} className="w-[132px]" onClick={stopTestAll}>Stop</BusyButton>
-          ) : (
+          ) : !advanced ? null : (
             <span title="Tests every model again, including ones that already passed, on all three APIs. Each test is one tiny request. Stop cancels the ones that haven't run yet.">
               <BusyButton busy={sweepBusy} disabled={models.length === 0} className="w-[132px]" onClick={startTestAll}>Test all models</BusyButton>
             </span>
@@ -1306,23 +1204,41 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
         <table className="w-full table-fixed text-[13px]">
           <colgroup>
             <col />
-            <col className="hidden w-[236px] md:table-column" />
-            <col className="w-[128px]" />
+            <col className={advanced ? 'hidden w-[236px] md:table-column' : 'w-[230px]'} />
+            {advanced && <col className="w-[128px]" />}
             <col className="w-[76px]" />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-surface">
             <tr className="text-left text-[12px] text-mute">
               <th className="py-2 font-normal">Model</th>
-              <th className="hidden py-2 font-normal md:table-cell">Protocols</th>
-              <th className="py-2 font-normal">Surface</th>
+              <th className={cx('py-2 font-normal', advanced && 'hidden md:table-cell')}>{advanced ? 'APIs' : 'Status'}</th>
+              {advanced && <th className="py-2 font-normal">Force API</th>}
               <th className="py-2"><span className="sr-only">Test</span></th>
             </tr>
           </thead>
           <tbody>
             {models.map((m) => {
               const testing = testingId === m.id;
-              const unprobed = m.chat == null && m.anthropic == null && m.responses == null;
-              const queued = running && !testing && unprobed;
+              const status = modelStatus(m);
+              const queued = running && !testing && status === 'untested';
+              const testedLine = (
+                <div className="mt-0.5 text-[11px]" title={m.note ?? undefined}>
+                  {testing ? <span className="text-accent">Testing…</span>
+                    : queued ? <span className="text-accent">Queued</span>
+                    : <span className="text-mute">{m.source === 'curated' ? 'Set by hand' : m.tested_at ? `Tested ${relTime(m.tested_at)}` : 'Not tested yet'}{m.pin ? ` · always ${apiName(m.pin)}` : ''}</span>}
+                </div>
+              );
+              const simple = (
+                <>
+                  <div className={cx('flex items-center gap-1.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
+                    <span className={cx('h-1.5 w-1.5 rounded-full', status === 'works' ? 'bg-ok' : status === 'untested' ? 'bg-line-strong' : 'bg-bad')} />
+                    <span className={status === 'works' ? 'text-dim' : status === 'untested' ? 'text-mute' : 'text-bad'}>
+                      {status === 'works' ? 'Works' : status === 'untested' ? 'Not tested' : "Doesn't work"}
+                    </span>
+                  </div>
+                  {testedLine}
+                </>
+              );
               const verdicts = (
                 <>
                   <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] transition-opacity', (testing || queued) && 'opacity-40')}>
@@ -1332,7 +1248,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                         ['Responses', m.responses],
                       ] as const).map(([label, v]) => (
                         <span key={label} className="flex items-center gap-1"
-                          title={v == null ? `${label}: no probe` : `${label}: ${v === true ? 'ok' : v === false ? 'failed' : `HTTP ${v}`}`}>
+                          title={v == null ? `${label}: not tested` : `${label}: ${v === true ? 'works' : v === false ? "doesn't work" : `HTTP ${v}`}`}>
                           <span className={cx('h-1.5 w-1.5 rounded-full', v === true ? 'bg-ok' : v == null ? 'bg-line-strong' : 'bg-bad')} />
                           <span className={v === true ? 'text-dim' : v == null ? 'text-mute' : 'text-bad'}>
                             {label}{typeof v === 'number' ? ` ${v}` : ''}
@@ -1340,11 +1256,7 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                         </span>
                       ))}
                     </div>
-                    <div className="mt-0.5 text-[11px]" title={m.note ?? undefined}>
-                      {testing ? <span className="text-accent">Testing…</span>
-                        : queued ? <span className="text-accent">Queued</span>
-                        : <span className="text-mute">{m.source === 'curated' ? 'Curated' : m.tested_at ? `Probed ${relTime(m.tested_at)}` : 'Not probed'}</span>}
-                    </div>
+                    {testedLine}
                 </>
               );
               return (
@@ -1353,15 +1265,15 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                   {/* Wraps on a phone (no hover there, and ids often share a
                       long prefix); one truncated line on desktop, full id on hover. */}
                   <div title={m.id} className="break-all font-code text-[12px] text-ink md:truncate md:break-normal">{m.id}</div>
-                  {/* On a phone the protocols column folds under the name. */}
-                  <div className="mt-1 md:hidden">{verdicts}</div>
+                  {/* On a phone the APIs column folds under the name. */}
+                  {advanced && <div className="mt-1 md:hidden">{verdicts}</div>}
                 </td>
-                <td className="hidden md:table-cell">
-                  {verdicts}
+                <td className={cx(advanced && 'hidden md:table-cell')}>
+                  {advanced ? verdicts : simple}
                 </td>
-                <td>
+                {advanced && <td>
                   <select
-                    aria-label={`surface for ${m.id}`}
+                    aria-label={`API for ${m.id}`}
                     value={m.pin ?? ''}
                     onChange={(e) => onPinChange(m, e.target.value)}
                     className={cx('h-7 w-[112px] rounded-md border bg-transparent px-1.5 text-[12px] transition-colors hover:border-line-strong focus:border-accent focus:outline-none',
@@ -1370,16 +1282,23 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
                     <option value="">Auto</option>
                     {PIN_SURFACES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                </td>
+                </td>}
                 <td className="text-right">
-                  <BusyButton busy={testing}
-                    className="h-7 w-[60px] px-0 text-[12px]"
-                    disabled={running || sweepBusy || m.source === 'curated'}
-                    onClick={() => testOne(m)}>
-                    <span title={m.source === 'curated'
-                      ? 'You set this result by hand, so tests won\'t change it. Release it first if you want to test again.'
-                      : 'Sends one tiny request to this model on each of the three APIs. It checks the API works, not how the model handles tools.'}>Test</span>
-                  </BusyButton>
+                  {m.source === 'curated' ? (
+                    <BusyButton busy={releasingId === m.id}
+                      className="h-7 w-[60px] px-0 text-[12px]"
+                      disabled={running || sweepBusy}
+                      onClick={() => releaseOne(m)}>
+                      <span title="You set this result by hand, so tests won't change it. Release hands it back to the tests; the result stays until the next test.">Release</span>
+                    </BusyButton>
+                  ) : (
+                    <BusyButton busy={testing}
+                      className="h-7 w-[60px] px-0 text-[12px]"
+                      disabled={running || sweepBusy}
+                      onClick={() => testOne(m)}>
+                      <span title="Sends one tiny request to this model on each of the three APIs. It checks the API works, not how the model handles tools.">Test</span>
+                    </BusyButton>
+                  )}
                 </td>
               </tr>
               );
@@ -1391,9 +1310,9 @@ function ModelsDrawer({ id, syncedAt }: { id: number; syncedAt?: string }) {
       {pendingForce && (
         <ConfirmModal
           open
-          title={`Pin ${pendingForce.model} to ${pendingForce.pin}?`}
-          body={`Testing hasn't confirmed ${pendingForce.model} works on ${pendingForce.pin}. If the provider doesn't support it, every request will fail with a 400.`}
-          confirmLabel="Pin anyway"
+          title={`Always send ${pendingForce.model} as ${apiName(pendingForce.pin)}?`}
+          body={`Testing hasn't confirmed ${pendingForce.model} works on ${apiName(pendingForce.pin)}. If the provider doesn't support it, every request will fail with a 400.`}
+          confirmLabel="Force anyway"
           onConfirm={() => applyPin(pendingForce.model, pendingForce.pin, true)}
           onClose={() => setPendingForce(null)}
         />
@@ -1644,6 +1563,10 @@ function ClaudeUsageExtras({ raw }: { raw: string }) {
 
 function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: () => void; onRead?: () => void }) {
   const [live, setLive] = useState<QuotaLive | null>(null);
+  // The stored reading this modal shows. It is re-read with the account right
+  // after a live read, so the bars change together with "read just now"
+  // instead of one parent reload later.
+  const [quota, setQuota] = useState(account.quota);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<ApiErrorDetail | null>(null);
   const [rules, setRules] = useState<ModelRule[] | null>(null);
@@ -1654,7 +1577,12 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
     setBusy(true);
     setErr(null);
     get<QuotaLive>(`/admin/accounts/${account.id}/quota`)
-      .then((q) => { setLive(q); onRead?.(); })
+      .then(async (q) => {
+        const fresh = await get<Account>(`/admin/accounts/${account.id}`).catch(() => null);
+        if (fresh) setQuota(fresh.quota);
+        setLive(q);
+        onRead?.();
+      })
       .catch((e: unknown) => setErr({ status: 0, type: 'error', message: e instanceof Error ? e.message : 'quota read failed' }))
       .finally(() => setBusy(false));
   }, [account.id]);
@@ -1695,13 +1623,13 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 <span className="rounded-full border border-line bg-bg px-2 py-0.5 font-mono text-[12px] text-accent">{live.kind}</span>
                 <span className="text-mute">read {live.read_at ? relTime(live.read_at) : '—'}</span>
-                {account.quota?.plan && <span className="text-dim">· {account.quota.plan}</span>}
-                {account.quota?.resets_at && <span className="text-mute">· resets {relTime(account.quota.resets_at)}</span>}
+                {quota?.plan && <span className="text-dim">· {quota.plan}</span>}
+                {quota?.resets_at && !quota.groups?.length && <span className="text-mute">· resets {untilTime(quota.resets_at)}</span>}
               </div>
               {/* The reading first, as the card shows it; the provider's own
                   response is evidence, one click away, not the headline. */}
-              {account.quota && account.quota.kind !== 'none' && account.quota.kind !== 'unknown' ? (
-                <div className="max-w-md"><QuotaBars quota={account.quota} /></div>
+              {quota && quota.kind !== 'none' && quota.kind !== 'unknown' ? (
+                <div className="max-w-md"><QuotaBars quota={quota} /></div>
               ) : null}
               <ClaudeUsageExtras raw={live.raw} />
               <details className="group">
@@ -1714,7 +1642,7 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
           )}
         </div>
         <div className="rounded-lg border border-line bg-raised/60 p-4">
-          <SectionLabel>Request budget · account-wide</SectionLabel>
+          <SectionLabel>Request budget · provider-wide</SectionLabel>
           {(account.rate_limit ?? 0) > 0 ? (
             <p className="mt-2 text-[13px] text-dim">
               <span className="font-mono tabular-nums text-ink">{account.rate_limit}</span> requests per{' '}
@@ -1763,8 +1691,10 @@ function QuotaModal({ account, onClose, onRead }: { account: Account; onClose: (
 
 // ── account card ────────────────────────────────────────────────────────
 
-function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChanged, onReloadQuota, quotaBusy }: {
+function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChanged, onReloadQuota, quotaBusy, parked, onUnpark }: {
   a: Account; open: boolean; onToggle: () => void;
+  /** This account's parked models, and Unpark for all of them. */
+  parked: Cooldown[]; onUnpark: () => Promise<void>;
   /** A deep link asked for this card's Edit or Pricing modal. */
   intent: 'edit' | 'keys' | 'pricing' | null; onIntentDone: () => void;
   issues: Issue[];
@@ -1891,6 +1821,11 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
           <motion.span className="inline-block" animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.22 }}>⌄</motion.span>
         </button>
       </div>
+      {parked.length > 0 && (
+        <div className="-mt-1.5 px-5 pb-2.5 pl-10">
+          <ParkedPill items={parked} keyCount={a.keys.filter((k) => k.enabled).length} onUnpark={onUnpark} what={new Set(parked.map((c) => c.model)).size === 1 ? 'this model' : `these ${new Set(parked.map((c) => c.model)).size} models`} />
+        </div>
+      )}
 
       {/* The expandable body animates its HEIGHT, not just its opacity: the
           row below moves by a real, measurable amount, and a fade alone
@@ -1908,7 +1843,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             <span title="Set per-model USD rates for cost analysis">
               <BusyButton onClick={() => setPricingOpen(true)}>Pricing</BusyButton>
             </span>
-            <span title="Provider settings and API keys">
+            <span title="Provider settings and keys">
               <BusyButton onClick={() => { setEditTab('settings'); setEditing(true); }}>Edit &amp; keys</BusyButton>
             </span>
             <label className="flex items-center gap-2 text-[13px] text-dim" title={a.enabled ? 'Routing may use this provider' : 'Disabled: routing skips this provider'}>
@@ -1983,7 +1918,7 @@ function AccountCard({ a, open, onToggle, intent, onIntentDone, issues, onChange
             title={confirm?.kind === 'key' ? `Delete key ${confirm.label}?` : `Delete provider ${a.name}?`}
             body={confirm?.kind === 'key'
               ? 'The key is removed right away. The provider stays, but requests to it will fail until you add another key.'
-              : 'This removes the provider and all its keys. Any combo that uses it will lose that hop.'}
+              : 'This removes the provider and all its keys. Any combo that uses it will lose that model.'}
             busy={menuBusy != null}
             onClose={() => setConfirm(null)}
             onConfirm={() => {
@@ -2014,8 +1949,16 @@ type Intent = { id: number; kind: 'edit' | 'keys' | 'pricing' };
 
 export default function Providers() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const cooldowns = useCooldowns();
   const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // /providers?add=1 (the quick-jump palette) opens the Add provider form.
+  const [addParams, setAddParams] = useSearchParams();
+  useEffect(() => {
+    if (addParams.get('add') !== '1') return;
+    setAddOpen(true);
+    setAddParams((p) => { const n = new URLSearchParams(p); n.delete('add'); return n; }, { replace: true });
+  }, [addParams, setAddParams]);
   const [quotaBusy, setQuotaBusy] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [onlyIssues, setOnlyIssues] = useState(false);
@@ -2117,7 +2060,7 @@ export default function Providers() {
       ) : accounts.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface px-6 py-14 text-center">
           <p className="text-[14px] font-medium">No providers yet</p>
-          <p className="mt-1 text-[13px] text-mute">Add your first one. Give it a name and an API key, and ezllm tests it for you.</p>
+          <p className="mt-1 text-[13px] text-mute">Add your first one. Give it a name and its key, and ezllm tests it for you.</p>
           <button type="button" className={cx(btn.base, btn.primary, 'mt-5')} onClick={() => setAddOpen(true)}>＋ Add your first provider</button>
         </div>
       ) : shown.length === 0 ? (
@@ -2143,7 +2086,9 @@ export default function Providers() {
                   issues={issuesOf.get(a.id) ?? []}
                   onChanged={() => load(true)}
                   quotaBusy={quotaBusy === a.id}
-                  onReloadQuota={() => void reloadQuota(a.id)} />
+                  onReloadQuota={() => void reloadQuota(a.id)}
+                  parked={cooldowns.list.filter((c) => c.namespace === a.namespace)}
+                  onUnpark={() => cooldowns.unpark(a.namespace)} />
               </StaggerItem>
             ))}
           </Stagger>

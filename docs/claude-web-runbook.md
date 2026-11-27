@@ -1,72 +1,52 @@
-# claude-web provider — operator runbook (M14)
+# Use Claude.ai through its web sign-in
 
-Claude.ai's **web** protocol as a provider (sessionKey cookie, SSE
-completion). Ported from omniroute's production implementation; design:
-`docs/claude-web-design.md`; the stale community digest
-(`~/workspace/claude-ai-re-client-protocol-digest.md`, last verified
-2026-04-25) is cross-reference only.
+The **Claude.ai (web)** provider sends requests the way the claude.ai website does,
+signed in with a browser cookie. It is unofficial. For a Claude plan, the
+[Claude bridge](bridges/claude.md) is the supported way.
 
-## Risk posture (accepted by Calypso, 2026-10-16)
+Before you start, know the risks:
 
-- **Cookie material = live account access.** The stored `sessionKey` row is
-  the account. Encrypted key store only; never chat/logs/YAML.
-- **Automation risk.** Scripted use of the consumer web app can get the
-  account flagged or locked. Use a test account.
-- **Cloudflare.** claude.ai fingerprints TLS. The client impersonates
-  Chrome's handshake (uTLS `chrome_146` profile, ported from omniroute).
-  A challenge surfaces as a typed 403 (`cloudflare_challenge`) — the
-  browser fallback omniroute uses is NOT implemented; retry guidance only.
-- **No fallback.** Expired/challenged sessions fail honestly (401/403); no
-  official-API degradation.
+- **The cookie is your account.** Anyone with it can use the account. ezllm stores it
+  encrypted; never put it in `config.yaml`, a chat or a log.
+- **Scripted use can get the account locked.** Use a test account, never your main one.
+- **Cloudflare can refuse it.** ezllm presents itself as Chrome. A refusal shows as
+  `403 cloudflare_challenge`; there is no browser fallback.
+- **Every request appears in the account's chat list** on claude.ai.
 
-## Adding an account
+## Add it
 
-1. Sign into claude.ai in a browser with the **test** account.
-2. DevTools → Application → Cookies → `https://claude.ai`: copy the value of
-   `sessionKey`.
-3. Register the account with kind `claude-web` and base URL the sentinel
-   `internal://claudeweb` (the router rewrites it to the in-process bridge).
-4. Store the cookie as the account key: `sessionKey=sk-ant-…` (the bare
-   token is also accepted).
-5. The registration key test runs org discovery (`GET /api/organizations`
-   — one request, zero quota) through the bridge: 200 = live cookie.
-6. Models: this protocol has **no discovery**. The router seeds a bootstrap
-   catalog from the ids the reference implementation pins (`claude-opus-5`,
-   `claude-sonnet-4-6`) plus hyphenated-convention siblings — a starting
-   point, NOT entitlement. The bridge passes ANY model id through; the
-   upstream answer reveals what the account can serve. If you need an id
-   that isn't in the seed, it still routes — the first error is the answer.
+1. Sign in to claude.ai in a browser with the test account.
+2. Open the developer tools → **Application** → **Cookies** → `https://claude.ai`, and
+   copy the value of `sessionKey`.
+3. In ezllm, open **Providers** → **Add provider**, pick **Claude.ai (web)**, and paste
+   it as `sessionKey=sk-ant-…`. Choose **Save & validate key**.
 
-## How turns work
+The check reads the account's organisation, which uses no quota. A pass means the cookie
+works.
 
-- **One fresh upstream conversation per request.** The prompt already carries
-  the caller's whole flattened history, so nothing is chained across requests
-  (chaining leaked one caller's turns into another's context until
-  2026-10-23). Each conversation appears in the account's claude.ai chat list.
-  A cut stream (no `message_stop`) commits nothing.
-- History is flattened into one prompt (user/tool turns joined with blank
-  lines) — the web protocol has no message array. Fine for chat, lossy for
-  agent scaffolding.
-- **Tools pass through natively** (Anthropic shape `{name, description,
-  input_schema}`) — this surface DOES carry tool use.
-- **No structured output** (`response_format` gets a typed 400
-  `unsupported_feature`) and **no image input**.
+The website has no model list, so ezllm starts with a few known Claude models. Any other
+model ID is passed on too: the answer tells you if the account has it.
 
-## Failure cards
+## What it can do
 
-| Symptom | Meaning | Action |
-|---|---|---|
-| 401 authentication_error | Cookie expired / signed out | Re-export sessionKey, replace the key row |
-| 403 cloudflare_challenge | TLS fingerprint or bot gate rejected | Retry; the profile version may need a bump (`chromeMajor` in tlsclient.go) |
-| 403 authentication_error (plain) | Account forbidden (not a challenge) | Check the account state in the browser |
-| 429 | Rate limited | Wait; lower concurrency |
-| 502 stream ended before message_stop | Upstream cut mid-turn | Nothing committed; retry the turn |
+- Text answers. No images, no `response_format`.
+- Tools are sent to claude.ai, but a tool call cannot come back. When Claude answers with
+  one, the request fails with `chat_tools_unsupported` and a combo moves on to the next
+  hop. For agents, put a hop that serves tools after this one.
+- Each request starts a new claude.ai conversation, with the whole history flattened
+  into one message. That suits chat; agents lose some structure.
 
-## Version pins worth remembering
+## Not working?
 
-- TLS profile: `chrome_146` (constant in `internal/claudeweb/tlsclient.go`)
-  — bump when Cloudflare starts rejecting the profile, same spirit as the
-  Copilot CLI version floor.
-- The prompt flattening + uuid-chaining + payload shapes are ported
-  slot-for-slot from the compiled reference; the design doc lists every
-  ported index.
+| You see | Do this |
+|---|---|
+| `401 authentication_error` | The cookie expired or you signed out. Copy a new `sessionKey` and replace the key |
+| `403 cloudflare_challenge` | Cloudflare refused the connection. Try again later |
+| `403 authentication_error` | The account itself is refused. Check it in a browser |
+| `429` | Rate limited. Wait, and send fewer requests at once |
+| `502 stream ended before message_stop` | claude.ai stopped mid-answer. Nothing was kept; try again |
+| `400 … chat_tools_unsupported` | Claude answered with a tool call, which this account cannot pass back. Use a combo with a hop that serves tools |
+
+---
+
+**How it works:** [claude-web design](design/claude-web-design.md)

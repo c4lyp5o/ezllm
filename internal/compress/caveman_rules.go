@@ -23,8 +23,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // embeddedPackFS holds the built-in English packs. Embedding them means a
@@ -66,6 +69,10 @@ type cavemanRule struct {
 	ReplaceMap   map[string]string // keyed by lowercased matched text
 	MinIntensity int               // intensityLite or intensityStandard
 	Category     string
+	// Need is the case-folded literal text every match contains, as
+	// alternatives (one of them must appear); nil means the rule always runs.
+	// applyPacks skips a rule whose text holds none of them.
+	Need []string
 }
 
 // cavemanPack is a validated set of rules from one category file.
@@ -166,30 +173,80 @@ func parsePacks(raw []string) ([]cavemanPack, []string) {
 	return packs, diags
 }
 
+// captureRef finds $1 / ${name} style references in a replacement.
+var captureRef = regexp.MustCompile(`\$(?:\d|\{)`)
+
+func mapValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}
+
 // minMatchLen is the shortest string the pattern can match, used only for the
 // hygiene gate. Go's regexp has no literal-length analysis, so we approximate
 // from the source: strip quantifier/alternation metacharacters and count the
 // literal remainder, flooring at 1. An approximation is fine here — the gate
 // exists to reject obviously-inflating rules, not to prove a bound.
 func minMatchLen(re *regexp.Regexp) int {
-	src := re.String()
-	src = strings.TrimPrefix(src, `(?i)`)
-	var lit strings.Builder
-	for i := 0; i < len(src); i++ {
-		c := src[i]
-		switch c {
-		case '\\':
-			i++ // escaped char counts as one literal
-			lit.WriteByte('x')
-		case '(', ')', '[', ']', '{', '}', '*', '+', '?', '|', '^', '$', '.':
-			// structural: contributes nothing guaranteed
-		default:
-			lit.WriteByte(c)
-		}
-	}
-	n := lit.Len()
-	if n < 1 {
+	parsed, err := syntax.Parse(re.String(), syntax.Perl)
+	if err != nil {
 		return 1
+	}
+	if n := minLen(parsed.Simplify()); n > 0 {
+		return n
+	}
+	return 1
+}
+
+// minLen is the fewest bytes any match of re can be: the shortest branch of
+// an alternation, one character of a class, nothing for an optional part.
+func minLen(re *syntax.Regexp) int {
+	switch re.Op {
+	case syntax.OpLiteral:
+		n := 0
+		for _, r := range re.Rune {
+			n += minRuneLen(r, re.Flags&syntax.FoldCase != 0)
+		}
+		return n
+	case syntax.OpCharClass:
+		if len(re.Rune) == 0 {
+			return 0
+		}
+		return utf8.RuneLen(re.Rune[0]) // ranges are sorted: the first is the shortest
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return 1
+	case syntax.OpCapture, syntax.OpPlus:
+		return minLen(re.Sub[0])
+	case syntax.OpRepeat:
+		return re.Min * minLen(re.Sub[0])
+	case syntax.OpConcat:
+		n := 0
+		for _, sub := range re.Sub {
+			n += minLen(sub)
+		}
+		return n
+	case syntax.OpAlternate:
+		best := -1
+		for _, sub := range re.Sub {
+			if n := minLen(sub); best < 0 || n < best {
+				best = n
+			}
+		}
+		return max(best, 0)
+	}
+	return 0 // star, quest, anchors, word boundaries, empty match
+}
+
+// minRuneLen is the shortest UTF-8 encoding r can match: under (?i) any
+// member of its case-folding orbit.
+func minRuneLen(r rune, fold bool) int {
+	n := utf8.RuneLen(r)
+	if fold {
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			n = min(n, utf8.RuneLen(f))
+		}
 	}
 	return n
 }
@@ -202,15 +259,20 @@ func minMatchLen(re *regexp.Regexp) int {
 func applyPacks(packs []cavemanPack, text string, intensity int) (string, int, string) {
 	out := text
 	fired := 0
+	folded := foldText(out) // refreshed only when a rule changes out
 	for _, p := range packs {
 		for _, r := range p.Rules {
 			if r.MinIntensity > intensity {
 				continue
 			}
+			if r.Need != nil && !containsAny(folded, r.Need) {
+				continue // the literal every match needs is absent
+			}
 			replaced, n := replaceRule(r, out)
 			if n > 0 {
 				fired++
 				out = replaced
+				folded = foldText(out)
 			}
 		}
 	}
@@ -296,6 +358,13 @@ func validateRule(lang, category string, r rawRule) (cavemanRule, string, bool) 
 	if r.Replacement != nil {
 		repl = *r.Replacement
 	}
+	// replaceRule emits replacements literally, so "$1" would land in the
+	// prompt as the two characters "$1" (a shipped rule once did exactly that).
+	for _, v := range append([]string{repl}, mapValues(r.ReplacementMap)...) {
+		if captureRef.MatchString(v) {
+			return reject("replacement %q uses a capture reference, which rules cannot do", v)
+		}
+	}
 	shortest := minMatchLen(re)
 	if len(r.ReplacementMap) == 0 && len(repl) >= shortest {
 		return reject("replacement %d bytes cannot beat its shortest match (%d)",
@@ -317,6 +386,123 @@ func validateRule(lang, category string, r rawRule) (cavemanRule, string, bool) 
 	}
 	return cavemanRule{
 		Name: r.Name, Re: re, Replacement: repl, ReplaceMap: norm,
-		MinIntensity: level, Category: cat,
+		MinIntensity: level, Category: cat, Need: ruleNeeds(`(?i)` + r.Pattern),
 	}, "", true
+}
+
+// ── rule prefilter ──────────────────────────────────────────────────────────
+// Each rule is a full regex pass, and on prose most rules cannot match. A rule
+// is skipped when its text holds none of the literals every match needs. The
+// check folds case the way (?i) matching does (Unicode simple folding), so it
+// never skips a rule that would match: it only saves the passes that would
+// find nothing.
+
+// ruleNeeds returns the folded literals one of which every match of pattern
+// contains, or nil when no such literal can be derived.
+func ruleNeeds(pattern string) []string {
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil
+	}
+	need := requiredLiterals(re.Simplify())
+	for _, l := range need {
+		if l == "" {
+			return nil
+		}
+	}
+	return need
+}
+
+// requiredLiterals: nil means no requirement is known.
+func requiredLiterals(re *syntax.Regexp) []string {
+	switch re.Op {
+	case syntax.OpLiteral:
+		return []string{foldText(string(re.Rune))}
+	case syntax.OpCapture, syntax.OpPlus:
+		// Simplify has already rewritten counted repeats into these and '?'.
+		return requiredLiterals(re.Sub[0])
+	case syntax.OpAlternate:
+		var out []string
+		for _, sub := range re.Sub {
+			l := requiredLiterals(sub)
+			if l == nil {
+				return nil // one branch needs nothing, so the whole needs nothing
+			}
+			out = append(out, l...)
+		}
+		return out
+	case syntax.OpConcat:
+		// Adjacent literal children form one longer literal; any child's
+		// requirement is the whole concat's. Keep the most selective one: the
+		// set whose shortest member is longest.
+		var best []string
+		consider := func(c []string) {
+			if c != nil && (best == nil || shortestLen(c) > shortestLen(best)) {
+				best = c
+			}
+		}
+		var run []rune
+		for _, sub := range re.Sub {
+			if sub.Op == syntax.OpLiteral {
+				run = append(run, sub.Rune...)
+				continue
+			}
+			if len(run) > 0 {
+				consider([]string{foldText(string(run))})
+				run = nil
+			}
+			consider(requiredLiterals(sub))
+		}
+		if len(run) > 0 {
+			consider([]string{foldText(string(run))})
+		}
+		return best
+	}
+	return nil
+}
+
+func shortestLen(ls []string) int {
+	n := -1
+	for _, l := range ls {
+		if n < 0 || len(l) < n {
+			n = len(l)
+		}
+	}
+	return n
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// foldText maps every rune to the smallest member of its simple case-folding
+// orbit, so two strings that (?i) treats as equal fold to the same text.
+func foldText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		b.WriteRune(foldRune(r))
+	}
+	return b.String()
+}
+
+func foldRune(r rune) rune {
+	if r < 0x80 {
+		if r >= 'a' && r <= 'z' {
+			return r - 'a' + 'A' // 'A'..'Z' are the smallest of their orbits
+		}
+		return r
+	}
+	least := r
+	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+		if f < least {
+			least = f
+		}
+	}
+	return least
 }

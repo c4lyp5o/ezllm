@@ -1,95 +1,69 @@
-# Pricing runbook
+# Prices and cost
 
-ezllm prices are **versioned rows** in `model_prices`, keyed
-`(account_id, model_id, effective_from)`. Cost is derived at query time from the
-rate effective on the call's date, so a reprice never rewrites history.
+ezllm puts a cost on each request from a price list. The cost is an estimate from list
+prices, not a bill.
 
-## Cadence
+## Where prices come from
 
-Refresh **daily** — provider list prices change on the order of weeks, and a
-daily pass is enough to keep the catalog honest without hammering the source.
-ezllm runs this **inside the process**: once 45 seconds after boot (so a fresh
-deploy fills the catalog immediately), then every day at 03:00 local. No
-external cron or systemd timer is needed. The pass is idempotent for the day
-(same `effective_from` upserts), and an operator can still POST the endpoint
-manually at any time.
+ezllm fills the list itself from a public price snapshot (LiteLLM's): 45 seconds after it
+starts, then daily at 03:00 in your timezone. It needs to reach GitHub for that.
 
-Manual refresh is always available:
+A model gets a price when its ID ends with a name in the snapshot: `gpt-5-nano` matches
+`openai/gpt-5-nano`, but `gpt-5` never prices `gpt-5-nano`. Other models stay unpriced
+until you set a rate.
 
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $(cat ~/.hermes/secrets/ezllm-admin.token)" \
-  'https://llm.calypso.dedyn.io/admin/prices/refresh?source=litellm'
+Turn the daily refresh off in **Settings** → **Gateway** → **Automatic price refresh**, or
+with `EZLLM_PRICE_REFRESH=off`.
+
+## Set a price yourself
+
+In **Providers**, choose **Pricing** on the account. Rates are US dollars per million
+tokens: **Input**, **Output**, **Cache read** and **Cache write**.
+
+Each rate starts on a date. A request uses the rate that applied on its day, so a new
+price never changes the cost of older requests. Setting the same date again replaces that
+rate.
+
+The refresh never changes a model you priced yourself, by hand or by import: it keeps
+your rate. To let the snapshot price that model again, delete your rates for it.
+
+## See the cost
+
+**Token Economics** shows spend for a time range. **Unpriced** counts requests with no rate
+on their date. They add `$0`, so while it is above zero, the total is too low.
+
+## With the API
+
+These need an admin key. Refresh from the snapshot now:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+  'http://127.0.0.1:20129/admin/prices/refresh?source=litellm'
 ```
 
-The response reports `entries` (source rows), `matched` (catalog matches
-written), and `effective_from`. Unmatched models still need manual rates — the
-matcher uses an **exact model-id suffix** (`gpt-5-nano` ↔
-`openai/gpt-5-nano`), never a prefix, so `gpt-5` cannot price `gpt-5-nano`.
+The answer says how many models it priced (`matched`) and how many it left alone because
+you priced them (`kept`). Add `&effective_from=2026-01-01`
+to apply today's prices from an earlier date.
 
-For a one-off historical backfill, add `&effective_from=2026-09-18` (or another
-past date). The cost report will apply today's list price to calls from that
-date onward; the rows still carry `source="litellm"` as an estimate, not an
-invoice.
+Import rates from your own source, such as a billing export. Each model must exist in that
+account, or the import is refused:
 
-## What the refresh writes
-
-- `source = "litellm"`, `fetched_at = now`, `note = "litellm snapshot; list
-  price, not a bill"`.
-- Each matched account/model gets today's `effective_from`.
-- The source is a public community snapshot, not a provider invoice. Treat it
-  as a list-price estimate; override a specific account/model with
-  `PUT /admin/accounts/{id}/prices` when you have the real rate.
-
-## Bulk import
-
-`POST /admin/prices/import` accepts a snapshot from any source:
-
-```json
-{
-  "source": "my-billing-export",
-  "prices": [
-    {"account_id": 6, "model_id": "qwen3.8-flash", "effective_from": "2026-10-01",
-     "price_in": 0.2, "price_out": 1.6, "price_cache_read": 0.04, "price_cache_write": 0.25}
-  ]
-}
+```sh
+curl -s -X POST -H "Authorization: Bearer YOUR_ADMIN_KEY" -H 'Content-Type: application/json' \
+  http://127.0.0.1:20129/admin/prices/import -d '{"source":"my-billing-export","prices":[
+  {"account_id":6,"model_id":"model-name","effective_from":"2026-01-01",
+   "price_in":0.2,"price_out":1.6,"price_cache_read":0.04,"price_cache_write":0.25}]}'
 ```
 
-Rows must name a model that exists in that account's catalog; a typo is a 400,
-not a silently unpriced row.
+Any key that can call models can read a price. Add `&at=2026-01-01` for the price on a
+date:
 
-## Query
-
-```bash
-# current rate
-curl -s -H "Authorization: Bearer $EZLLM_INFER_TOKEN" \
-  'https://llm.calypso.dedyn.io/v1/prices?model=gpt-5-nano'
-
-# the rate that was effective on a date (for a historical bill)
-curl -s -H "Authorization: Bearer $EZLLM_INFER_TOKEN" \
-  'https://llm.calypso.dedyn.io/v1/prices?model=gpt-5-nano&at=2026-10-01'
+```sh
+curl -s -H "Authorization: Bearer YOUR_EZLLM_KEY" 'http://127.0.0.1:20129/v1/prices?model=gpt-5-nano'
 ```
 
-`GET /admin/cost` then reports USD plus `unpriced_calls`; `pricing_complete`
-is false while any call has no effective rate. Never read `usd` as the full
-bill when `unpriced_calls > 0`.
+`GET /admin/cost` gives the spend, with `unpriced_calls` and `pricing_complete`.
 
-## Scheduling
+---
 
-The scheduler is **inside ezllm** — no external cron, no systemd timer:
-
-- first pass ~45 seconds after boot when automatic refresh is enabled;
-- then daily at **03:00** in the effective instance usage timezone: environment
-  override → saved Settings value → explicit YAML → UTC;
-- scheduled job success/failure timestamps appear in System diagnostics and
-  persist across restarts.
-
-Change automatic price refresh in Settings → Gateway, or enforce
-`EZLLM_PRICE_REFRESH=off` from the deployment (for an air-gapped instance).
-An explicit environment value locks the Settings control. Live changes reschedule
-future work; an already-running refresh may finish. Enabling refresh after startup
-schedules the next daily run; use the manual endpoint for an immediate pass.
-Prices stay manual/import-only unless the process can reach GitHub.
-
-The admin endpoint remains available for an immediate manual pass or a
-backfill; schedule nothing else.
+**Every field:** [API.md](API.md)

@@ -15,11 +15,11 @@ import (
 // Determinism is the same contract as the other two translators: fixed struct
 // order, tool arguments passed through as strings, the input slice never
 // mutated — byte-stable bodies are what keeps an upstream prefix cache warm.
-// Contract table: docs/responses-wire-design.md (anthropic leg).
+// Contract table: docs/design/responses-wire-design.md (anthropic leg).
 //
 // Dropped by design (locked decisions, same as the anthropic→chat leg):
 // stop_sequences, metadata, thinking / redacted_thinking (Q4), cache_control,
-// and image blocks (the responses input_image wants a URL we do not have).
+// and image blocks (sent as input_image, from a data: URI or the source url).
 func AnthropicToResponses(body []byte, upstreamModel string) ([]byte, error) {
 	var req AnthropicRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -92,7 +92,7 @@ func anthropicUserItems(content any) []responsesInputItem {
 			out = append(out, responsesInputItem{
 				kind:   itemFunctionOutput,
 				callID: blockString(block, "tool_use_id"),
-				output: flattenText(block["content"]),
+				output: markToolError(flattenText(block["content"]), block["is_error"] == true),
 			})
 		case "text":
 			if t, ok := block["text"].(string); ok {
@@ -104,7 +104,12 @@ func anthropicUserItems(content any) []responsesInputItem {
 		case "thinking", "redacted_thinking":
 			// dropped — locked decision Q4
 		case "image":
-			// dropped — responses input_image needs a URL we do not have
+			// A base64 source becomes a data: URI and a url source passes
+			// through; both are what input_image takes.
+			if url := anthropicImageURL(block); url != "" {
+				flush()
+				out = append(out, newResponsesImageItem(url))
+			}
 		}
 	}
 	flush()
@@ -184,4 +189,22 @@ func translateAnthropicToolChoice(tc *AnthropicToolChoice) any {
 	default:
 		return "auto"
 	}
+}
+
+// anthropicImageURL turns an Anthropic image block's source into a URL: a
+// data: URI for base64, the url itself for a url source. "" when neither.
+func anthropicImageURL(block map[string]any) string {
+	src, _ := block["source"].(map[string]any)
+	switch src["type"] {
+	case "base64":
+		mt, _ := src["media_type"].(string)
+		data, _ := src["data"].(string)
+		if mt != "" && data != "" {
+			return "data:" + mt + ";base64," + data
+		}
+	case "url":
+		u, _ := src["url"].(string)
+		return u
+	}
+	return ""
 }

@@ -1,19 +1,24 @@
 import { subscribePreferences } from './utils/preferences';
+import type { UpdateStatus } from './utils/api';
 // App shell: token unlock gate → sidebar layout → routes.
 // Nothing renders or fetches before the unlock screen hands back a token.
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { GateError, completeSetup, dashboardLogin, getSetupStatus, isUnlocked, logout, markUnlocked } from './utils/api';
+import { Brand } from './ez/Brand';
+import { UpdateArrow } from './ez/UpdateArrow';
+import { GateError, completeSetup, dashboardLogin, getSetupStatus, getUpdate, isUnlocked, logout, markUnlocked } from './utils/api';
 import { DUR, SelectionLine, spring } from './components/motion';
 import RailwayBackground from './components/RailwayBackground';
 import PasswordStrength from './components/PasswordStrength';
 import NotificationBell from './components/NotificationBell';
 import { MIN_PASSWORD } from './utils/passwordStrength';
 import { readTheme, setTheme, type Theme } from './utils/theme';
-import { Spinner, btn, cx } from './components/ui';
+import { CopyButton, Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
+import { CommandPalette, OPEN_PALETTE } from './components/CommandPalette';
 import { PageBoundary, PageLoading } from './components/PageBoundary';
+import { useExtras, type ExtraKey } from './utils/extras';
 
 // Pages load on demand: the unlock screen downloads none of them (nor the
 // chart library most of them pull in), and each page's code arrives the first
@@ -31,27 +36,30 @@ const Requests = lazy(() => import('./pages/Requests'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Neighbourhood = lazy(() => import('./pages/Neighbourhood'));
+const Start = lazy(() => import('./pages/Start'));
 
 // One sidebar entry per destination — Stats / Token Economics / Requests live
 // together under Analytics (same data family, tabbed).
 // A labelled sidebar, not the dealt icon rail: ten destinations need words.
 // The hints are kept as each item's tooltip, not as a second line of text.
-type NavItem = { to: string; label: string; hint: string; match?: readonly string[] };
+type NavItem = { to: string; label: string; hint: string; match?: readonly string[]; extra?: ExtraKey; group: 'core' | 'more' | 'end' };
 
 const ANALYTICS_ROUTES = ['/stats', '/economics', '/requests'] as const;
 
+// Core first (what you need to route a request), then More (what ezllm can
+// also do for you), then Settings.
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
-  { to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
-  { to: '/providers', label: 'Providers', hint: 'keys · models · quota' },
-  { to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
-  { to: '/chat', label: 'Chat', hint: 'test a model' },
-  { to: '/combos', label: 'Combos', hint: 'routing chains' },
-  { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
-  { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
-  { to: '/connect', label: 'Connect', hint: 'routes · API keys' },
-  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers drawn as a city' },
-  { to: '/settings', label: 'Settings', hint: 'instance administration' },
+  { group: 'core', to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
+  { group: 'core', to: '/providers', label: 'Providers', hint: 'keys · models · quota' },
+  { group: 'core', to: '/combos', label: 'Combos', hint: 'routing chains' },
+  { group: 'core', to: '/connect', label: 'Connect', hint: 'address · app keys' },
+  { group: 'core', to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
+  { group: 'more', extra: 'compression', to: '/compression', label: 'Compression', hint: 'fewer tokens on long chats' },
+  { group: 'more', extra: 'rules', to: '/rules', label: 'Rules', hint: 'token limits · allowed hours' },
+  { group: 'more', extra: 'services', to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
+  { group: 'more', extra: 'chat', to: '/chat', label: 'Chat', hint: 'try your models' },
+  { group: 'more', extra: 'neighbourhood', to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers drawn as a city' },
+  { group: 'end', to: '/settings', label: 'Settings', hint: 'instance administration' },
 ];
 
 // One restrained 16px stroke icon per destination. Inline SVG keeps the
@@ -97,11 +105,6 @@ const ANALYTICS_TABS = [
 
 const isAnalytics = (path: string) => (ANALYTICS_ROUTES as readonly string[]).some((p) => path === p || path.startsWith(`${p}/`));
 
-const LOGO = (
-  // The shared ez mark (same image as the favicon and the ezconv app icon).
-  <img src="/icons/icon-192.png" alt="ezllm" width={20} height={20} className="h-5 w-5 rounded-[4px]" />
-);
-
 // The version beside the wordmark is the RUNNING server's, read from the
 // public /healthz (the one source of truth: the Go constant it serves). A
 // placeholder constant here once said v0.1.0 while the server was 0.0.19.
@@ -115,6 +118,21 @@ function useServerVersion(): string {
     return () => { alive = false; };
   }, []);
   return version;
+}
+
+// A newer release, when the server's daily check found one. Re-read hourly so a
+// tab left open learns about it; a failed read keeps what is shown.
+const UPDATE_POLL_MS = 3_600_000;
+function useUpdate(): UpdateStatus | null {
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => getUpdate().then((u) => { if (alive) setUpdate(u); }).catch(() => undefined);
+    read();
+    const t = setInterval(read, UPDATE_POLL_MS);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return update?.available ? update : null;
 }
 
 // Where the source lives. Opened in a new tab with an explicit rel: this is a
@@ -179,10 +197,7 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
       style={{ background: '#05070d' }}>
       <RailwayBackground />
       <div className="relative w-full max-w-sm rounded-xl border border-line bg-surface p-8">
-        <div className="flex items-center gap-2.5">
-          {LOGO}
-          <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
-        </div>
+        <Brand name="ezllm" />
         {mode === 'loading' && <div className="mt-6 flex justify-center"><Spinner /></div>}
         {mode === 'setup' && <SetupForm onDone={done} onAlreadySet={() => setMode('login')} />}
         {mode === 'login' && <SignInForm onDone={done} onSetupRequired={() => setMode('setup')} />}
@@ -226,6 +241,9 @@ function SignInForm({ onDone, onSetupRequired }: { onDone: () => void; onSetupRe
   );
 }
 
+// Where the setup code is, for the usual Docker install.
+const SETUP_CODE_CMD = 'docker logs ezllm | grep setup';
+
 function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet: () => void }) {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -240,7 +258,8 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
     if (password !== confirm) { setErr('the passwords do not match'); return; }
     setBusy(true);
     completeSetup(code, password)
-      .then(onDone)
+      // A new instance goes straight to Get started.
+      .then(() => { window.history.replaceState(null, '', '/start'); onDone(); })
       .catch((error: unknown) => {
         if (error instanceof GateError && error.type === 'setup_complete') { onAlreadySet(); return; }
         setErr(error instanceof Error ? error.message : 'setup failed');
@@ -256,6 +275,10 @@ function SetupForm({ onDone, onAlreadySet }: { onDone: () => void; onAlreadySet:
       <p className="mt-2 text-[13px] text-mute">
         This is the first start. Enter the setup code from the ezllm server log, then pick a password.
       </p>
+      <div className="mt-3 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-bg px-2.5 py-1.5 font-mono text-[12px]">{SETUP_CODE_CMD}</code>
+        <CopyButton text={SETUP_CODE_CMD} label="Copy" />
+      </div>
       <form onSubmit={submit} className="mt-6">
         <Field id="setup-code" label="Setup code" autoFocus autoComplete="one-time-code" placeholder="XXXX-XXXX"
           value={code} onChange={edit(setCode)} className={cx(fieldClass(false), 'font-mono uppercase tracking-widest')} />
@@ -278,30 +301,42 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [theme, setThemeState] = useState<Theme>(() => readTheme());
  useEffect(() => subscribePreferences(() => setThemeState(readTheme())), []);
   const version = useServerVersion();
+  const update = useUpdate();
 
   const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
+  // Read again on each page change, so "in use" follows what you just set up.
+  const extras = useExtras(location.pathname);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 pb-6 pt-5">
-        {LOGO}
-        <span className="text-[15px] font-semibold tracking-tight">ezllm</span>
+        <Brand name="ezllm" />
         {version && (
-          <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
-            aria-label={`ezllm ${version}, source on GitHub (opens in a new tab)`} title="Source on GitHub"
-            className="ml-auto text-[12px] text-mute transition-colors hover:text-ink">
+          <a href={update ? update.url : REPO_URL} target="_blank" rel="noreferrer noopener"
+            aria-label={update ? `ezllm ${version}, v${update.latest} available, release notes (opens in a new tab)`
+              : `ezllm ${version}, source on GitHub (opens in a new tab)`}
+            title={update ? `v${update.latest} available` : 'Source on GitHub'}
+            className={cx('ml-auto text-[12px] transition-colors', update
+              ? 'inline-flex items-center gap-1 rounded bg-warn-dim px-2 py-0.5 text-warn hover:text-ink' : 'text-mute hover:text-ink')}>
             {version}
+            {update && <UpdateArrow />}
           </a>
         )}
       </div>
       <LayoutGroup id={onNavigate ? 'nav-drawer' : 'nav-side'}>
       <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
-        {NAV.map((item) => {
+        {NAV.map((item, i) => {
+          const heading = item.group === 'more' && NAV[i - 1]?.group !== 'more';
+          const gap = item.group === 'end';
+          const inUse = item.extra ? extras?.[item.extra] === true : false;
           const active = item.match
             ? item.match.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
             : item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
-            <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'} title={item.hint}
+            <Fragment key={item.to}>
+            {heading && <div className="px-2.5 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-mute" role="presentation">More</div>}
+            {gap && <div className="pt-4" role="presentation" />}
+            <NavLink to={item.to} onClick={onNavigate} end={item.to === '/'} title={item.hint}
               aria-current={active ? 'page' : undefined}
               className={cx('flex h-[34px] items-center gap-2.5 rounded px-2.5 transition-colors',
                 active ? 'text-ink' : 'text-mute hover:bg-hover hover:text-ink')}>
@@ -313,11 +348,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 {item.label}
                 {active && <SelectionLine layoutId="nav-line" />}
               </span>
+              {inUse && <span className="ml-auto text-[11px] text-mute">in use</span>}
             </NavLink>
+            </Fragment>
           );
         })}
       </nav>
       </LayoutGroup>
+      <div className="px-3 pb-2">
+        <button type="button" onClick={() => { onNavigate?.(); window.dispatchEvent(new Event(OPEN_PALETTE)); }}
+          className="flex w-full items-center justify-between rounded-md border border-line px-3 py-1.5 text-[12px] text-mute transition-colors hover:border-line-strong hover:text-ink">
+          <span>Jump to…</span><kbd className="font-sans text-[11px]">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
+      </div>
       <div className="grid grid-cols-3 border-t border-line px-3 py-2">
         <a href={REPO_URL} target="_blank" rel="noreferrer noopener"
           aria-label="ezllm source on GitHub (opens in a new tab)" title="Source on GitHub"
@@ -349,9 +392,10 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/combos': { title: 'Combos', sub: 'Ordered routing chains with failover.' },
   '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
   '/compression': { title: 'Compression', sub: 'Compression profiles and how much they save.' },
-  '/connect': { title: 'Connect', sub: 'API keys, and how to point your apps at ezllm.' },
-  '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Busier providers glow brighter.' },
+  '/connect': { title: 'Connect', sub: 'App keys, and how to point your apps at ezllm.' },
+  '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Taller means busier; red means failing.' },
   '/settings': { title: 'Settings', sub: 'Preferences, security, backups and request limits.' },
+  '/start': { title: 'Get started', sub: 'Three steps to your first request.' },
 };
 
 export default function App() {
@@ -383,6 +427,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-dvh">
+      <CommandPalette />
       {/* Top bar — mobile only */}
       <header className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
         <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
@@ -391,8 +436,7 @@ export default function App() {
             <path d="M3 5.5h14M3 10h14M3 14.5h14" />
           </svg>
         </button>
-        {LOGO}
-        <span className="text-[14px] font-semibold tracking-tight">ezllm</span>
+        <Brand name="ezllm" />
         <div className="ml-auto">{!desktop && <NotificationBell />}</div>
       </header>
 
@@ -472,22 +516,15 @@ export default function App() {
             Dashboard). */}
         {/* Each screen arrives with a short rise; keyed on the path so a
             tab switch inside Analytics replays it, a poll never does.
-            AnimatePresence plays the OUTGOING screen's exit too — without
-            it the old screen is unmounted in the same frame the new one
-            starts, and the swap reads as a blink rather than a move.
-            mode="wait" keeps them from overlapping (both are in normal flow,
-            so a crossfade would push the page down); the exit is deliberately
-            FAST (DUR.fast) so navigation never feels like it waits.
-
-            Do NOT put initial={false} on this AnimatePresence. That flag is
-            inherited by EVERY motion descendant, not just the direct child:
-            it overrides each descendant's own `initial`, so the panels'
-            staggered entrances were silently skipped and the whole screen
-            appeared at its final state on the first paint. */}
-        <AnimatePresence mode="wait">
+            Entrance only, on purpose: an AnimatePresence exit kept the leaving
+            screen, and its <Routes> read the NEW location from context, so the
+            new page rendered inside the leaving wrapper and then mounted a
+            second time (two loads, a blink of lost state). Freezing the old
+            location fixed that but made every swap wait for the whole old
+            tree's exit animations (over a second). The old screen now goes in
+            the same frame and the new one rises in, mounted once. */}
           <motion.div key={location.pathname} className="mt-5"
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6, transition: { duration: DUR.fast, ease: [0.22, 1, 0.36, 1] } }}
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}>
             <PageBoundary key={location.pathname}>
             <Suspense fallback={<PageLoading />}>
@@ -505,12 +542,12 @@ export default function App() {
               <Route path="/connect" element={<Connect />} />
               <Route path="/neighbourhood" element={<Neighbourhood />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/start" element={<Start />} />
               <Route path="*" element={<Dashboard />} />
             </Routes>
             </Suspense>
             </PageBoundary>
           </motion.div>
-        </AnimatePresence>
       </main>
     </div>
   );

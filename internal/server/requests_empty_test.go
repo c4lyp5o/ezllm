@@ -15,11 +15,11 @@ func TestRequestsCountAndHideZeroTokenSteps(t *testing.T) {
 	h := newHarness(t, func(http.ResponseWriter, *http.Request) {})
 	now := time.Now()
 	for _, c := range []store.Call{
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10, TokensOut: 5},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensCachedRead: 900},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 200},
-		{TS: now, Client: "hermes", Surface: store.SurfaceChat, Model: "m", Status: 502},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensIn: 10, TokensOut: 5},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200, TokensCachedRead: 900},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 200},
+		{TS: now, Client: "my-app", Surface: store.SurfaceChat, Model: "m", Status: 502},
 	} {
 		h.db.RecordCall(c)
 	}

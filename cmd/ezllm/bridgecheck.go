@@ -22,7 +22,7 @@ import (
 	"github.com/c4lyp5o/ezllm/internal/server"
 )
 
-// Bridge CLI qualification and the bridge-check gate (SPEC-bridge-update.md
+// Bridge CLI qualification and the bridge-check gate (docs/design/SPEC-bridge-update.md
 // §4.2–4.3). The host updater runs `ezllm bridge-check` against a staged CLI
 // before it promotes it; boot runs the same checks, so the updater cannot pass
 // a release boot would reject. The gate is stricter than boot: flag drift, the
@@ -69,7 +69,7 @@ func recordQualifies(bin, version string) (bool, error) {
 // releaseState is the `cli_release` a bridge reports: qualified when the
 // version is the one this build was measured on or the updater proved it.
 func releaseState(bin, version, measured string) string {
-	if version == measured {
+	if measured != "" && version == measured {
 		return "qualified"
 	}
 	ok, err := recordQualifies(bin, version)
@@ -78,6 +78,9 @@ func releaseState(bin, version, measured string) string {
 		return "unqualified (" + qualifiedFile + " unreadable: " + err.Error() + ")"
 	case ok:
 		return "qualified (live proof recorded by the updater)"
+	}
+	if measured == "" {
+		return "unqualified (no live proof recorded for this release)"
 	}
 	return "unqualified (measured on " + measured + "; re-run the live proof)"
 }
@@ -134,11 +137,14 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 	if err := set.Parse(args[1:]); err != nil {
 		return err
 	}
+	if set.NArg() > 0 {
+		return fmt.Errorf("bridge-check %s: unexpected argument %q: put flags before anything else", name, set.Arg(0))
+	}
 
 	ctx := context.Background()
 	var v bridgeVerdict
 	var liveRun func() []string
-	var agyResume bool
+	var agyPre agybridge.Preflight
 	switch name {
 	case "claude":
 		b, d := or(*bin, envOrDefault(envBridgeBin, defaultClaudeBin)), or(*home, claudeHome(os.Getenv))
@@ -155,9 +161,9 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		}
 	case "agy":
 		b, h := or(*bin, envOrDefault(envAgyBin, defaultAgyBin)), or(*home, envOrDefault(envAgyHome, "/agy-sub"))
-		v, agyResume = checkAgyCLI(ctx, b, h)
+		v, agyPre = checkAgyCLI(ctx, b, h)
 		liveRun = func() []string {
-			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")), agyResume)
+			return liveAgy(ctx, b, h, or(*model, "gemini-3.8-flash-low"), or(*toolModel, or(*model, "gemini-3.8-flash-low")), agyPre)
 		}
 	case "copilot":
 		b, h := or(*bin, envOrDefault(envCopilotBin, defaultCopilotBin)), or(*home, copilotHome(os.Getenv))
@@ -181,11 +187,11 @@ func runBridgeCheck(args []string, stdout io.Writer) error {
 		}
 	case "agy":
 		mode := "off"
-		if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") {
+		if agyPre.StructuredOutput {
 			mode = "structured-output"
 		}
 		v.Policy = map[string]string{"caller_tools": mode}
-		if cache, _ := agySessionCache(os.Getenv, mode == "structured-output", agyResume); cache {
+		if cache, _ := agySessionCache(os.Getenv, agyPre.StructuredOutput, agyPre.ConversationResume); cache {
 			v.Policy["session_cache"] = "conversation-resume"
 		}
 	case "copilot":
@@ -249,7 +255,7 @@ func checkClaudeCLI(bin, dir string) bridgeVerdict {
 		v.Problems = append(v.Problems, "binary does not resolve: "+err.Error())
 		return v
 	}
-	raw, drift := claudeCLICheck(resolved)
+	raw, drift := claudeCLICheck(context.Background(), resolved)
 	if raw == "unavailable" {
 		v.Problems = append(v.Problems, drift)
 		return v
@@ -259,7 +265,7 @@ func checkClaudeCLI(bin, dir string) bridgeVerdict {
 	if drift != "" {
 		v.Problems = append(v.Problems, "flags the CLI no longer accepts: "+drift)
 	}
-	if state, plan := claudeLoginCheck(resolved, dir); state != "logged-in" {
+	if state, plan := claudeLoginCheck(context.Background(), resolved, dir); state != "logged-in" {
 		v.Problems = append(v.Problems, "login "+state+": "+plan)
 	}
 	return v
@@ -299,38 +305,38 @@ func checkCodexCLI(ctx context.Context, bin, home string) (bridgeVerdict, codexb
 	return v, pre
 }
 
-// checkAgyCLI also reports whether the CLI resumes conversations: the session
-// cache defaults on only where it can.
-func checkAgyCLI(ctx context.Context, bin, home string) (bridgeVerdict, bool) {
+// checkAgyCLI also returns the preflight: caller tools and the session cache
+// default on only where the CLI supports them.
+func checkAgyCLI(ctx context.Context, bin, home string) (bridgeVerdict, agybridge.Preflight) {
 	v := bridgeVerdict{Bridge: "agy"}
 	if runtime.GOOS != "linux" {
 		v.Problems = append(v.Problems, "the agy bridge is a Linux feature (this build is "+runtime.GOOS+")")
-		return v, false
+		return v, agybridge.Preflight{}
 	}
 	resolved, err := exec.LookPath(bin)
 	if err != nil {
 		v.Problems = append(v.Problems, "binary does not resolve: "+err.Error())
-		return v, false
+		return v, agybridge.Preflight{}
 	}
 	pre, err := agybridge.RunPreflight(ctx, resolved, home)
 	v.Version = pre.Version
 	if pre.Version != "" {
-		v.Release = releaseState(bin, pre.Version, agybridge.QualifiedVersion)
+		v.Release = releaseState(bin, pre.Version, "")
 	}
 	if err != nil {
 		v.Problems = append(v.Problems, err.Error())
-		return v, false
+		return v, agybridge.Preflight{}
 	}
 	if len(pre.Models) == 0 {
 		v.Problems = append(v.Problems, "the CLI listed no models")
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") && !pre.StructuredOutput {
-		v.Problems = append(v.Problems, "experimental caller tools require --json-schema")
+	if !pre.StructuredOutput {
+		v.Problems = append(v.Problems, "CLI lacks --json-schema: client tools would be off")
 	}
-	if _, cacheErr := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"), pre.ConversationResume); cacheErr != nil {
+	if _, cacheErr := agySessionCache(os.Getenv, pre.StructuredOutput, pre.ConversationResume); cacheErr != nil {
 		v.Problems = append(v.Problems, cacheErr.Error())
 	}
-	return v, pre.ConversationResume
+	return v, pre
 }
 
 func checkCopilotCLI(ctx context.Context, bin, home string) bridgeVerdict {
@@ -569,8 +575,8 @@ func liveCodex(ctx context.Context, bin, home string, pre codexbridge.Preflight,
 	return problems
 }
 
-func liveAgy(ctx context.Context, bin, home, model, toolModel string, resume bool) []string {
-	cache, err := agySessionCache(os.Getenv, strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on"), resume)
+func liveAgy(ctx context.Context, bin, home, model, toolModel string, pre agybridge.Preflight) []string {
+	cache, err := agySessionCache(os.Getenv, pre.StructuredOutput, pre.ConversationResume)
 	if err != nil {
 		return []string{err.Error()}
 	}
@@ -578,7 +584,7 @@ func liveAgy(ctx context.Context, bin, home, model, toolModel string, resume boo
 	defer r.Close()
 	res, err := r.Run(ctx, agybridge.Request{Model: model, Prompt: livePrompt}, func(string) error { return nil })
 	problems := appendIf(nil, judgeTurn("plain turn", err, res.Text, int64(res.Usage.OutputTokens), "", ""))
-	if len(problems) == 0 && strings.EqualFold(strings.TrimSpace(os.Getenv(envAgyTools)), "on") {
+	if len(problems) == 0 && pre.StructuredOutput {
 		problems = appendIf(problems, judgeLive("caller tools", agybridge.LiveTools(ctx, r, toolModel)))
 		if cache && len(problems) == 0 {
 			problems = appendIf(problems, judgeLive("conversation cache", agybridge.LiveConversationCache(ctx, r, toolModel)))

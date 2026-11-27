@@ -26,7 +26,11 @@ func readBody(r *http.Request, max int64) (body []byte, tooLarge bool, err error
 		}
 		var probe [1]byte
 		n, err := r.Body.Read(probe[:])
-		if n == 0 && (err == io.EOF || err == nil) {
+		// An empty read without an error is not EOF.
+		for n == 0 && err == nil {
+			n, err = r.Body.Read(probe[:])
+		}
+		if n == 0 && err == io.EOF {
 			return body, false, nil
 		}
 		if err != nil && err != io.EOF {
@@ -51,4 +55,20 @@ func readBody(r *http.Request, max int64) (body []byte, tooLarge bool, err error
 		return nil, true, nil
 	}
 	return body, false, nil
+}
+
+// readWebBridgeBody keeps uploads outside the per-account generation lock.
+func readWebBridgeBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	lift := limitBodyRead(w, inferenceBodyTimeout)
+	body, tooLarge, err := readBody(r, 4<<20)
+	if tooLarge {
+		writeErr(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds 4 MiB")
+		return nil, false
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request_error", "cannot read body")
+		return nil, false
+	}
+	lift()
+	return body, true
 }

@@ -26,7 +26,7 @@ const page = await t.page(async (route, url) => {
   if (p === '/admin/combos') { await json(route, combos); return true; }
   if (p === '/admin/usage') {
     const g = url.searchParams.get('group_by');
-    await json(route, { groups: g === 'alias' ? [{ k: 'daily', calls: 40, saved: 12000 }, { k: '(direct)', calls: 2, saved: 100 }] : [{ k: 'Groq', calls: 40, saved: 12000 }], totals: {} });
+    await json(route, { groups: g === 'alias' ? [{ k: 'daily', calls: 40, saved: 12000, applied_saved: 12000 }, { k: '(direct)', calls: 2, saved: 100, applied_saved: 100 }] : [{ k: 'Groq', calls: 40, saved: 12000, applied_saved: 12000 }], totals: {} });
     return true;
   }
   if (p === '/admin/requests') {
@@ -166,7 +166,8 @@ try {
   // duplicate + edit dirty gate
   await card('agent-output').getByRole('button', { name: 'Duplicate' }).click();
   await dialog().getByText('Duplicate agent-output').waitFor();
-  check('duplicate pre-fills a non-colliding name', (await dialog().getByLabel('Profile name').inputValue()) === 'agent-output-copy');
+  const copyNameShown = await dialog().getByLabel('Profile name').inputValue();
+  check('duplicate pre-fills a non-colliding name', copyNameShown === 'agent-output-copy', copyNameShown);
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });
   await card('agent-output').getByRole('button', { name: 'Edit' }).click();
@@ -179,9 +180,23 @@ try {
   check('the percent is sent as a ratio', /"min_compress_ratio":0.2/.test(last(/^PATCH \/admin\/compression-profiles\/1 /)[0] ?? ''), calls);
 
   // deep links
+  // A deep link opens the editor from a fetch, not a click: watch every DOM
+  // change so Save is never enabled, not even for the first frame before the
+  // profile's values load (that frame also made Escape ask to discard).
+  await page.addInitScript(() => {
+    window.__saveEverEnabled = false;
+    const look = () => {
+      for (const b of document.querySelectorAll('[role="dialog"] button[type="submit"]')) {
+        if (b.textContent.trim() === 'Save profile' && !b.disabled) window.__saveEverEnabled = true;
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true }));
+  });
   await page.goto(`${t.base}/compression?edit=1`);
   await dialog().getByText('Edit agent-output').waitFor();
   check('?edit= opens that profile', true);
+  await page.waitForTimeout(300);
+  check('?edit= opens with Save disabled from the first frame', !(await page.evaluate(() => window.__saveEverEnabled)));
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/compression?new=1`);
   await dialog().getByText('New profile').waitFor();

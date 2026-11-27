@@ -13,6 +13,8 @@ import {
 } from '../utils/api';
 import { CauseChip, CopyButton, SectionLabel, Segmented, btn, cx, inputCls, labelCls } from '../components/ui';
 import { Stagger, StaggerItem } from '../components/motion';
+import { ExportButtons } from '../components/ExportButtons';
+import type { Column } from '../utils/export';
 
 const RANGES: RangeKey[] = ['24h', '7d', '30d', '365d'];
 const SORTS: { key: RequestSort; label: string }[] = [
@@ -103,6 +105,16 @@ function RowDetail({ r }: { r: FeedRow }) {
     </div>
   );
 }
+
+// Export columns: the ledger's own names, so a file reads like the API.
+const REQUEST_COLUMNS: Column<FeedRow>[] = [
+  { key: 'ts', get: (r) => r.ts }, { key: 'client', get: (r) => r.client }, { key: 'surface', get: (r) => r.surface },
+  { key: 'alias', get: (r) => r.alias }, { key: 'account', get: (r) => r.account }, { key: 'model', get: (r) => r.model },
+  { key: 'status', get: (r) => r.status }, { key: 'stream', get: (r) => r.stream }, { key: 'ttft_ms', get: (r) => r.ttft_ms },
+  { key: 'total_ms', get: (r) => r.total_ms }, { key: 'tokens_in', get: (r) => r.tin }, { key: 'tokens_out', get: (r) => r.tout },
+  { key: 'cached_read', get: (r) => r.cread }, { key: 'cached_write', get: (r) => r.cwrite }, { key: 'reasoning', get: (r) => r.reasoning },
+  { key: 'tokens_saved', get: (r) => r.saved }, { key: 'translated', get: (r) => r.translated }, { key: 'error', get: (r) => r.error },
+];
 
 export default function Requests() {
   // Every filter lives in the URL, so a view survives a refresh and can be
@@ -248,7 +260,7 @@ export default function Requests() {
             </select>
           </label>
           <label className="block">
-            <span className={labelCls}>API key</span>
+            <span className={labelCls}>App key</span>
             <select className={cx(inputCls, 'w-48')} value={client} onChange={(e) => patch({ client: e.target.value })}>
               <option value="">All keys</option>
               {withCurrent(names.clients, client).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -278,6 +290,7 @@ export default function Requests() {
               onChange={(e) => patch({ hide_empty: e.target.checked ? '1' : undefined })} />
             Hide zero-token steps
           </label>
+          <span className="ml-auto"><ExportButtons what="requests" rows={rows} cols={REQUEST_COLUMNS} note={`the ${rows.length} rows shown`} /></span>
         </div>
       </form>
 
@@ -361,8 +374,8 @@ export default function Requests() {
                         INCLUSIVE total — read before comparing tin. */}
                     {r.translated && (
                       <div className="text-[11px] text-accent"
-                        title="This request was translated to the provider's protocol. Input tokens include cached tokens, as reported by the provider.">
-                        ⇄ translated
+                        title="This request was converted to the provider's API. Input tokens include cached tokens, as reported by the provider.">
+                        ⇄ converted
                       </div>
                     )}
                   </td>
@@ -378,7 +391,7 @@ export default function Requests() {
                   ) : (
                   <td className="px-4 py-2 text-right font-mono tabular-nums"
                     title={`tokens in ${nfmt(r.tin)} (↑) · tokens out ${nfmt(r.tout)} (↓)`}>
-                    <span title="tokens in (prompt, including cached tokens)">↑{nfmt(r.tin)}</span>{' '}
+                    <span title={r.translated ? 'tokens in (prompt, including cached tokens)' : 'tokens in (prompt, not counting cached tokens: see the cache column)'}>↑{nfmt(r.tin)}</span>{' '}
                     <span className="text-mute" title="tokens out (completion)">↓{nfmt(r.tout)}</span>
                   </td>
                   )}
@@ -402,7 +415,7 @@ export default function Requests() {
                 </tr>
                 {isOpen && (
                   <tr className="border-t border-line bg-wash">
-                    <td colSpan={10} className="px-4 py-3"><RowDetail r={r} /></td>
+                    <td colSpan={11} className="px-4 py-3"><RowDetail r={r} /></td>
                   </tr>
                 )}
                 </Fragment>

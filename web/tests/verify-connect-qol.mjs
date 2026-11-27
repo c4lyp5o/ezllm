@@ -130,10 +130,12 @@ try {
   await panel.getByRole('button', { name: 'I saved it' }).click();
   await page.getByText('Created laptop.').waitFor();
   check('closing the panel says what was created', true);
+  await panel.waitFor({ state: 'detached' });
 
   // policy
   await card('spent').getByRole('button', { name: 'Policy' }).click();
   const save = dialog().getByRole('button', { name: 'Save', exact: true });
+  await save.waitFor();
   check('Save is disabled until something changes', await save.isDisabled());
   await dialog().getByRole('button', { name: '10,000,000', exact: true }).click();
   check('the cap reads back in words', (await dialog().getByText('10,000,000 tokens per month').count()) === 1);

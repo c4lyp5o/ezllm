@@ -18,7 +18,7 @@ try {
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
     export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
-    export { startProgress, defaultTestModel, freeNamespace, isAppKey, START_PRESETS } from ${JSON.stringify(join(src, 'utils/start.ts'))};
+    export { startProgress, defaultTestModel, freeNamespace, isAppKey, START_PRESETS, SUB_PRESETS, bridgeState } from ${JSON.stringify(join(src, 'utils/start.ts'))};
     export { PROVIDER_PRESETS, modelStatus } from ${JSON.stringify(join(src, 'utils/providers.ts'))};
     export { plainReason, apiLabel } from ${JSON.stringify(join(src, 'utils/words.ts'))};
     export { extraStates, EXTRAS } from ${JSON.stringify(join(src, 'utils/extras.ts'))};
@@ -163,6 +163,15 @@ try {
   assert.equal(m.extraStates({ ...none, services: [{ mode: 'auto', resolved_target: 'acme/embed' }] }).services, true);
   assert.equal(m.extraStates({ ...none, services: [{ mode: 'off', resolved_target: 'acme/embed' }] }).services, false);
   assert.deepEqual(m.EXTRAS.map((x) => x.key), ['compression', 'rules', 'services', 'chat', 'neighbourhood']);
+
+  // A subscription bridge reads as ready, needing sign-in, off or unknown.
+  assert.equal(m.bridgeState(undefined), 'unknown');
+  assert.equal(m.bridgeState({ enabled: false }), 'off');
+  assert.equal(m.bridgeState({ enabled: true, status: { login: 'logged in (Pro)' } }), 'ready');
+  assert.equal(m.bridgeState({ enabled: true, status: { login: 'Logged-in' } }), 'ready');
+  assert.equal(m.bridgeState({ enabled: true, status: { login: 'not logged in' } }), 'signed-out');
+  assert.equal(m.bridgeState({ enabled: true }), 'ready', 'no login report: let the connection test decide');
+  for (const id of m.SUB_PRESETS) assert.ok(m.PROVIDER_PRESETS[id]?.bridge === id, `subscription ${id} has a bridge preset`);
 
   console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette, Get started, the plain words and the extras hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

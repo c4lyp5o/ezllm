@@ -4,6 +4,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Get started with a subscription.** Step 1 asks how you pay: **I have an API key** or
+  **I have a subscription**. With a subscription, each plan (Claude Pro/Max, ChatGPT
+  Plus/Pro, GitHub Copilot, Google Antigravity) shows where it stands. A ready plan
+  connects in one click, with no key. One that isn't signed in shows its sign-in
+  command. One that isn't set up names the setting that turns it on and links the steps
+  for your version, with **Check again** for when you're done.
 - **More.** The sidebar puts what you need to route a request first (Dashboard,
   Providers, Combos, Connect, Analytics) and the extras under **More** (Compression,
   Rules, Services, Chat, Neighbourhood), each marked "in use" once it is. An extra that

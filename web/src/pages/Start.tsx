@@ -2,10 +2,11 @@
 // provider, create a key for your app, send a test request with that key.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ApiError, get, type Account, type TestStep } from '../utils/api';
+import { ApiError, get, listBridges, type Account, type Bridge, type TestStep } from '../utils/api';
 import { createToken, listTokens, routableModels, type TokenInfo } from '../utils/tokens';
 import { PROVIDER_PRESETS, addProviderWithKey, slugify } from '../utils/providers';
-import { START_PRESETS, START_SUBTITLES, START_TITLES, defaultTestModel, freeNamespace, startProgress, type StartPreset } from '../utils/start';
+import { START_PRESETS, START_SUBTITLES, START_TITLES, SUB_PRESETS, SUB_TITLES, bridgeState, defaultTestModel, freeNamespace, startProgress, type BridgeState, type StartPreset, type SubPreset } from '../utils/start';
+import { SignInCommands } from '../components/Bridges';
 import { curlRequest, recipe } from '../utils/connect';
 import { CopyButton, Segmented, SecretInput, Spinner, btn, cx, inputCls, labelCls } from '../components/ui';
 
@@ -34,6 +35,19 @@ function Step({ n, title, state, summary, open, children }: {
 // ── 1 · provider ────────────────────────────────────────────────────────────
 
 function AddProvider({ taken, onDone }: { taken: string[]; onDone: (a: Account, models: number) => void }) {
+  const [way, setWay] = useState<'key' | 'sub'>('key');
+  return (
+    <div>
+      <Segmented<'key' | 'sub'> label="How you pay for AI" value={way} onChange={setWay}
+        options={[{ key: 'key', label: 'I have an API key' }, { key: 'sub', label: 'I have a subscription' }]} />
+      <div className="mt-4">
+        {way === 'key' ? <AddKeyProvider taken={taken} onDone={onDone} /> : <AddSubscription taken={taken} onDone={onDone} />}
+      </div>
+    </div>
+  );
+}
+
+function AddKeyProvider({ taken, onDone }: { taken: string[]; onDone: (a: Account, models: number) => void }) {
   const [preset, setPreset] = useState<StartPreset | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('');
@@ -97,9 +111,115 @@ function AddProvider({ taken, onDone }: { taken: string[]; onDone: (a: Account, 
           {err && <p role="alert" className="text-[13px] text-bad">{err}</p>}
         </div>
       )}
-      <p className="mt-4 text-[12px] text-mute">
-        Using a Claude, ChatGPT or Copilot subscription instead? <Link className="underline hover:text-ink" to="/providers?add=1">Add it on Providers</Link>.
+    </div>
+  );
+}
+
+const SUB_STATE_LABEL: Record<BridgeState, string> = {
+  ready: 'Ready', 'signed-out': 'Needs sign-in', off: 'Not set up', unknown: 'Unknown',
+};
+
+// A plan you already pay for, through its own CLI on the computer running
+// ezllm. The card shows where that bridge stands and the next thing to do.
+function AddSubscription({ taken, onDone }: { taken: string[]; onDone: (a: Account, models: number) => void }) {
+  const [bridges, setBridges] = useState<Bridge[] | null>(null);
+  const [loadErr, setLoadErr] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [plan, setPlan] = useState<SubPreset | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<TestStep[]>([]);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(() => {
+    setChecking(true);
+    listBridges()
+      .then((b) => { setBridges(b); setLoadErr(false); })
+      .catch(() => setLoadErr(true))
+      .finally(() => setChecking(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const bridge = plan ? bridges?.find((b) => b.id === plan) ?? null : null;
+  const state = plan ? bridgeState(bridge) : 'unknown';
+
+  const connect = async () => {
+    if (!plan) return;
+    const p = PROVIDER_PRESETS[plan];
+    setBusy(true); setErr(''); setSteps([]);
+    try {
+      const res = await addProviderWithKey(
+        { name: SUB_TITLES[plan], namespace: freeNamespace(plan, taken), kind: p.kind, base_url: bridge?.base_url ?? p.baseURL ?? '',
+          ...(p.usageConvention ? { usage_convention: p.usageConvention } : {}), requires_session_header: false, probe_delay_ms: 400 },
+        { label: 'primary', bridge: plan },
+        (s) => setSteps((prev) => [...prev, s]));
+      onDone(res.account, res.test.catalog?.length ?? 0);
+    } catch (e) {
+      setErr(errText(e));
+    } finally { setBusy(false); }
+  };
+
+  const connectButton = (label: string) => (
+    <div className="flex items-center gap-3">
+      <button type="button" className={cx(btn.base, btn.primary)} disabled={busy} onClick={() => void connect()}>
+        {busy ? <Spinner /> : null} {busy ? 'Checking the connection…' : label}
+      </button>
+      {busy && steps.length > 0 && <span className="text-[12px] text-mute">{steps.filter((x) => x.ok).length} checks passed</span>}
+    </div>
+  );
+  const checkAgain = (
+    <button type="button" className={cx(btn.base, btn.ghost)} disabled={checking} onClick={load}>
+      {checking ? <Spinner /> : null} Check again
+    </button>
+  );
+
+  return (
+    <div>
+      <p className="mb-3 text-[13px] text-mute">
+        ezllm can use a plan you already pay for, through that company's own app on the computer running ezllm.
+        The setup is for Linux. On Windows, use WSL.
       </p>
+      {loadErr && <p role="alert" className="mb-3 text-[13px] text-bad">Couldn't read the subscription status. {checkAgain}</p>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Subscription">
+        {SUB_PRESETS.map((id) => {
+          const st = bridges ? bridgeState(bridges.find((b) => b.id === id)) : null;
+          return (
+            <button key={id} type="button" role="radio" aria-checked={plan === id} disabled={busy}
+              onClick={() => { setPlan(id); setErr(''); setSteps([]); }}
+              className={cx('rounded-lg border px-3 py-3 text-left transition-colors',
+                plan === id ? 'border-ink bg-raised' : 'border-line hover:border-line-strong')}>
+              <span className="block text-[13px] font-medium">{SUB_TITLES[id]}</span>
+              <span className={cx('block text-[11px]', st === 'ready' ? 'text-ok' : 'text-mute')}>{st ? SUB_STATE_LABEL[st] : 'Checking…'}</span>
+            </button>
+          );
+        })}
+      </div>
+      {plan && bridges && (
+        <div className="mt-4 space-y-3 text-[13px]">
+          {state === 'ready' && <>
+            <p className="text-dim">Ready to use. No key needed: ezllm uses the plan's own app.</p>
+            {connectButton('Connect')}
+          </>}
+          {state === 'signed-out' && <>
+            <p className="text-dim">The app is set up on the computer running ezllm, but it isn't signed in.</p>
+            <SignInCommands id={plan} />
+            {connectButton('I\'ve signed in, connect')}
+          </>}
+          {state === 'off' && bridge && <>
+            <p className="text-dim">
+              This needs a one-time setup on the computer running ezllm: install the plan's app, sign in, and turn it on with{' '}
+              <code className="font-mono text-ink">{bridge.env}=on</code>. Then start ezllm again.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <a className={cx(btn.base, btn.primary)} href={bridge.docs + bridge.setup} target="_blank" rel="noreferrer">
+                Open the steps for {SUB_TITLES[plan]}
+              </a>
+              {checkAgain}
+            </div>
+          </>}
+          {state === 'unknown' && <p className="text-mute">This ezllm doesn't list {SUB_TITLES[plan]}. It may be an older version.</p>}
+          {err && <p role="alert" className="text-bad">{err}</p>}
+        </div>
+      )}
     </div>
   );
 }

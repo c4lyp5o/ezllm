@@ -53,3 +53,25 @@ export function freeNamespace(slug: string, taken: string[]): string {
     if (!taken.includes(s)) return s;
   }
 }
+
+// ── subscriptions ───────────────────────────────────────────────────────────
+
+/** The plans Get started offers to someone with a subscription instead of a key. */
+export const SUB_PRESETS = ['claude-sub', 'chatgpt-sub', 'copilot-sub', 'antigravity-sub'] as const;
+export type SubPreset = typeof SUB_PRESETS[number];
+export const SUB_TITLES: Record<SubPreset, string> = {
+  'claude-sub': 'Claude Pro/Max', 'chatgpt-sub': 'ChatGPT Plus/Pro', 'copilot-sub': 'GitHub Copilot', 'antigravity-sub': 'Google Antigravity',
+};
+
+/**
+ * Where a subscription bridge stands, from what the server reported at
+ * startup: ready to connect, on but its CLI isn't signed in, turned off, or
+ * unknown (the server didn't list it).
+ */
+export type BridgeState = 'ready' | 'signed-out' | 'off' | 'unknown';
+export function bridgeState(b?: { enabled: boolean; status?: Record<string, unknown> } | null): BridgeState {
+  if (!b) return 'unknown';
+  if (!b.enabled) return 'off';
+  const login = typeof b.status?.login === 'string' ? b.status.login.trim() : '';
+  return login && !/^logged[ -]in\b/i.test(login) ? 'signed-out' : 'ready';
+}

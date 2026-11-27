@@ -118,15 +118,25 @@ function Scroller({ follow, label, children }: { follow: string; label: string; 
   const [away, setAway] = useState(false);
   // Our own scrolls to the bottom raise scroll events that land after the
   // content has grown again, so "not near the bottom" alone cannot mean the
-  // reader left. Leaving is a scroll UP; content growth never moves the
-  // position up. At the bottom always means following.
+  // reader left. Leaving is a scroll UP that the reader made: a wheel, touch,
+  // key or scrollbar press just before it, or a jump of half a screen or more.
+  // The browser also moves the position up by itself when content shrinks (an
+  // entrance settling, a spinner row leaving), and if more content lands
+  // before that scroll event fires, the event reads as "up and far from the
+  // bottom". That is not the reader, so it must not let go.
+  // At the bottom always means following.
   const lastTop = useRef(0);
+  const intent = useRef(0);
+  const noteIntent = () => { intent.current = performance.now(); };
   const measure = () => {
     const el = ref.current;
     if (!el) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const up = lastTop.current - el.scrollTop;
+    const byReader = performance.now() - intent.current < 500 || up > el.clientHeight / 2;
     if (near) { stuck.current = true; setAway(false); }
-    else if (el.scrollTop < lastTop.current - 1) { stuck.current = false; setAway(true); }
+    else if (up > 1 && byReader) { stuck.current = false; setAway(true); }
+    else if (up > 1 && stuck.current) el.scrollTop = el.scrollHeight;
     lastTop.current = el.scrollTop;
   };
   // Content can change height without any scroll event (a spinner row leaving
@@ -157,7 +167,8 @@ function Scroller({ follow, label, children }: { follow: string; label: string; 
   }, []);
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={ref} onScroll={measure} role="log" aria-label={label} aria-live="off"
+      <div ref={ref} onScroll={measure} onWheel={noteIntent} onTouchMove={noteIntent} onKeyDown={noteIntent} onPointerDown={noteIntent}
+        role="log" aria-label={label} aria-live="off"
         className="h-full overflow-y-auto px-3 py-3">
         <div ref={inner} className="space-y-3">{children}</div>
       </div>

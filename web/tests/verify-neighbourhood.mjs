@@ -121,8 +121,10 @@ try {
   check("clicking a sign selects the building", (await attr(m, 2, "aria-pressed")) === "true" && (await m.getByLabel("Selected building").innerText()).includes("64,000"));
   await sign(m, 2).click();
   check("clicking it again closes the details", (await m.getByLabel("Selected building").count()) === 0);
-  await sign(m, 3).focus(); await m.keyboard.press("Enter");
-  check("the keyboard selects a building", (await attr(m, 3, "aria-pressed")) === "true");
+  await sign(m, 3).focus();
+  const focusedBefore = await m.evaluate(() => document.activeElement?.getAttribute("data-building") ?? document.activeElement?.tagName);
+  await m.keyboard.press("Enter");
+  check("the keyboard selects a building", (await attr(m, 3, "aria-pressed")) === "true", { focusedBefore, selected: await m.getByLabel("Selected building").count() });
 
   // A still scene stops drawing; a moving one keeps drawing.
   const frame = (p) => p.locator("canvas").evaluate((c) => c.toDataURL());

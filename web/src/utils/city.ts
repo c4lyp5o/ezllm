@@ -1,26 +1,25 @@
-// THE NEIGHBOURHOOD CITY — model, procedural layout, isometric projection.
+// THE NEIGHBOURHOOD CITY — the data mapping. Design: docs/design/neighbourhood-design.md.
 //
-// One building per provider account. The city is GENERATED from the provider
-// list (seeded, so a given set of providers always grows the same streets), and
-// then the data drives it:
+// One building per provider account, and one encoding per question:
 //
-//   data    height and window light   tokens per minute (5-minute window)
-//           weather                   error share of recent calls
-//           unlit / compacted         account or every key disabled
-//           roof flare + taxi         one live request (SSE ledger feed)
-//           traffic density           how busy the last minute was
-//   scenery street grid, roof plant, antennas, trees, parks, lamps, people
+//   height          tokens per minute, LINEAR against a ceiling (a ruler is drawn)
+//   window colour   lit = a call that worked, red = a call that failed, dark = no calls
+//   red sign, beacon, rain   failing now: 3+ calls and a quarter or more failed
+//   short, grey, boarded     the account or every key is switched off
+//   cars            one per live request (SSE ledger feed); red = it failed
 //
-// A provider that has never served is a low quiet building, never a lit one.
-// Nothing here invents activity: `usage === null` is `unknown`, and unknown
-// means no glow at all.
+// Placement follows state, never a random seed: failing providers stand in the
+// front row, then serving, then quiet, then switched off. Nothing here invents
+// activity: `usage === null` is `unknown`, drawn low and dark.
 import type { Account, UsageResp } from './api';
 
 /** Minutes of ledger the usage figures cover — the page's polling window. */
 export const WINDOW_MIN = 5;
-/** Full-glow floor: the busiest provider sets the scale, but never below this. */
-export const MIN_REF_TPM = 2_000;
 export const POLL_MS = 10_000;
+/** The lowest ceiling the busiest-provider scale uses, in tokens per minute. */
+export const MIN_CEILING = 1_000;
+/** Storeys of the tallest building, at the ceiling. */
+export const MAX_FLOORS = 24;
 
 /** The look-back the page can show. Usage is averaged over it into tokens per
  *  minute, so a longer window smooths a provider that was busy a while ago
@@ -32,6 +31,8 @@ export const WINDOWS = [
 ] as const;
 
 export type State = 'live' | 'idle' | 'off' | 'unknown';
+/** What the scene shows a building as. `failing` wins over `live`. */
+export type Health = 'failing' | 'serving' | 'quiet' | 'off' | 'unknown';
 
 export type CityKey = {
   id: string; label: string; hint: string; enabled: boolean;
@@ -39,27 +40,15 @@ export type CityKey = {
 };
 
 export type Building = {
-  id: string; name: string; short: string; namespace: string; kind: string;
-  enabled: boolean; state: State;
+  id: string; name: string; namespace: string; kind: string;
+  enabled: boolean; state: State; health: Health;
   tpm: number; calls: number; errors: number;
-  /** 0..1 share of the busiest provider's tokens per minute. */
-  level: number; storm: boolean;
+  /** 3+ calls and a quarter or more failed. */
+  storm: boolean;
   keys: CityKey[];
 };
 
-/** Log-scaled glow: full at the busiest provider, never below MIN_REF_TPM. */
-export function glowLevel(tpm: number, ref: number): number {
-  if (tpm <= 0) return 0;
-  return Math.min(1, Math.log10(1 + tpm) / Math.log10(1 + Math.max(ref, MIN_REF_TPM)));
-}
-
-/** Two-word sign name: long account names stay readable on a small facade. */
-export function signName(name: string): string {
-  const words = name.trim().split(/\s+/);
-  const two = words.slice(0, 2).join(' ');
-  if (two.length <= 16) return two;
-  return words[0].length <= 16 ? words[0] : `${words[0].slice(0, 15)}…`;
-}
+const isStorm = (calls: number, errors: number) => calls >= 3 && errors / calls >= 0.25;
 
 /** `windowMin` is the look-back `usage` was fetched for: tokens are averaged over it.
  *  `usage` is grouped by account (the ledger records the namespace) and gives each
@@ -72,7 +61,7 @@ export function buildBuildings(accounts: Account[], usage: UsageResp | null, win
   const byHint = new Map((keyUsage?.groups ?? []).map((g) => [g.k, g]));
   const hintCount = new Map<string, number>();
   for (const a of accounts) for (const k of a.keys) hintCount.set(k.hint, (hintCount.get(k.hint) ?? 0) + 1);
-  const raw = accounts.map((a) => {
+  return accounts.map((a) => {
     const total = byAccount.get(a.namespace);
     const keys: CityKey[] = a.keys.map((k) => {
       const g = a.keys.length === 1 ? total : hintCount.get(k.hint) === 1 ? byHint.get(k.hint) : undefined;
@@ -88,52 +77,110 @@ export function buildBuildings(accounts: Account[], usage: UsageResp | null, win
     const tpm = enabled && total ? (total.tin + total.tout) / windowMin : 0;
     const calls = enabled ? total?.calls ?? 0 : 0;
     const errors = enabled ? total?.errors ?? 0 : 0;
-    return {
-      id: String(a.id), name: a.name, short: signName(a.name), namespace: a.namespace,
-      kind: a.kind, enabled, tpm, calls, errors, keys,
-      state: (!enabled ? 'off' : usage === null ? 'unknown' : tpm > 0 ? 'live' : 'idle') as State,
-      storm: calls >= 3 && errors / calls >= 0.25,
-    };
+    const state: State = !enabled ? 'off' : usage === null ? 'unknown' : tpm > 0 ? 'live' : 'idle';
+    const storm = enabled && usage !== null && isStorm(calls, errors);
+    const health: Health = state === 'off' ? 'off' : state === 'unknown' ? 'unknown' : storm ? 'failing' : state === 'live' ? 'serving' : 'quiet';
+    return { id: String(a.id), name: a.name, namespace: a.namespace, kind: a.kind, enabled, state, health, tpm, calls, errors, storm, keys };
   });
-  const ref = Math.max(MIN_REF_TPM, ...raw.map((r) => r.tpm));
-  return raw.map((r) => ({ ...r, level: glowLevel(r.tpm, ref), storm: r.enabled && r.storm }));
 }
 
-// ── procedural street grid ────────────────────────────────────────────────
-// Blocks are square, streets run between them, and the whole plan is one
-// integer-seeded 2D lattice — cheap to place, cheap to draw, no WebGL.
-const BLOCK = 7.4;   // block side, tiles
-const ROAD = 2.8;    // street width, tiles
-const PITCH = BLOCK + ROAD;
-const SETBACK = 0.8; // sidewalk + frontage inside the block
+// ── scale ─────────────────────────────────────────────────────────────────
 
-export type Archetype = 'tower' | 'deco' | 'block' | 'glass' | 'hall' | 'warehouse';
+/** Rounds up to 1, 2, 2.5 or 5 times a power of ten: a ceiling a ruler can label. */
+export function niceCeil(v: number): number {
+  if (!(v > 0)) return MIN_CEILING;
+  const e = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * e >= v - 1e-9) return m * e;
+  return 10 * e;
+}
 
-export type Slot = {
-  id: string;              // provider account id
-  x: number; y: number;    // footprint, tiles
-  w: number; d: number;
-  archetype: Archetype;
-  tint: number;            // 0..3 palette index
-  seed: number;
-  block: { x: number; y: number; w: number; d: number };
-};
+/** The tokens/min a full-height building stands for: the operator's fixed
+ *  ceiling, or the busiest provider rounded up (never below MIN_CEILING). */
+export function scaleCeiling(buildings: Building[], fixed: number | null = null): number {
+  if (fixed && fixed > 0) return fixed;
+  return niceCeil(Math.max(MIN_CEILING, ...buildings.map((b) => b.tpm)));
+}
 
-export type Park = { x: number; y: number; w: number; d: number; seed: number; pond: boolean };
+/** Ruler ticks from 0 to the ceiling, in even steps of a round number. */
+export function rulerTicks(ceiling: number): number[] {
+  const mant = ceiling / Math.pow(10, Math.floor(Math.log10(ceiling)));
+  const parts = Math.abs(mant - 2.5) < 1e-9 || Math.abs(mant - 5) < 1e-9 ? 5 : 4;
+  return Array.from({ length: parts + 1 }, (_, i) => (ceiling * i) / parts);
+}
 
-export type Tree = { x: number; y: number; seed: number };
+/** Linear 0..1 share of the ceiling. Over the ceiling (a fixed scale) is 1. */
+export function share(tpm: number, ceiling: number): number {
+  return ceiling > 0 ? Math.min(1, Math.max(0, tpm / ceiling)) : 0;
+}
 
-export type CityPlan = {
-  seed: number;
-  w: number; d: number;                  // city extent, tiles
-  roadX: number[]; roadY: number[];      // street centre lines
-  blocks: { x: number; y: number; w: number; d: number }[];
-  slots: Slot[];
-  parks: Park[];
-  trees: Tree[];
-};
+/** Storeys to draw. Any traffic is at least one storey, so a small provider
+ *  never vanishes (its sign carries the exact number). */
+export function floorsOf(b: Building, ceiling: number): number {
+  if (b.health === 'off' || b.health === 'unknown' || b.tpm <= 0) return 1;
+  return Math.max(1, Math.round(share(b.tpm, ceiling) * MAX_FLOORS));
+}
 
-/** Deterministic 32-bit hash of a string (FNV-1a), used for every seed. */
+/** Share of windows lit (calls that worked) and red (calls that failed). The
+ *  rest stay dark. A building with no calls is dark. */
+export function windowMix(b: Building): { ok: number; failed: number } {
+  if (b.health === 'off' || b.health === 'unknown' || b.calls <= 0) return { ok: 0, failed: 0 };
+  const failed = Math.min(1, b.errors / b.calls);
+  return { ok: 1 - failed, failed };
+}
+
+// ── layout ────────────────────────────────────────────────────────────────
+
+const ROW_ORDER: Health[][] = [['failing'], ['serving'], ['quiet', 'unknown'], ['off']];
+
+/** Rows of buildings, front row first: failing, serving, quiet (and unknown),
+ *  switched off; each group by name, wrapped at `perRow`. */
+export function planRows(buildings: Building[], perRow = 4): Building[][] {
+  const rows: Building[][] = [];
+  const n = Math.max(1, Math.floor(perRow));
+  for (const group of ROW_ORDER) {
+    const g = buildings.filter((b) => group.includes(b.health))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    for (let i = 0; i < g.length; i += n) rows.push(g.slice(i, i + n));
+  }
+  return rows;
+}
+
+export type SignBox = { id: string; x: number; y: number; w: number; h: number };
+
+/** Signs in priority order (front row first) are nudged up, in `step` pixels,
+ *  until none overlaps one already placed. Returns each sign's final top. */
+export function placeSigns(signs: SignBox[], gap = 4, step = 4, maxLift = 400): Map<string, number> {
+  const placed: SignBox[] = [];
+  const out = new Map<string, number>();
+  const hits = (s: SignBox) => placed.some((o) => s.x < o.x + o.w + gap && s.x + s.w + gap > o.x && s.y < o.y + o.h + gap && s.y + s.h + gap > o.y);
+  for (const s of signs) {
+    const box = { ...s };
+    let lifted = 0;
+    while (hits(box) && lifted < maxLift) { box.y -= step; lifted += step; }
+    placed.push(box);
+    out.set(s.id, box.y);
+  }
+  return out;
+}
+
+// ── isometric projection ──────────────────────────────────────────────────
+// screen.x = (c - r) * TW/2      screen.y = (c + r) * TH/2 - z
+export const TW = 64;
+export const TH = 32;
+
+export function iso(c: number, r: number): { x: number; y: number } {
+  return { x: (c - r) * (TW / 2), y: (c + r) * (TH / 2) };
+}
+
+/** Deterministic 0..1 hash of three integers, for window patterns that do not
+ *  flicker between frames. */
+export function hash3(a: number, b: number, c: number): number {
+  let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 2147483647)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Deterministic 32-bit hash of a string (FNV-1a). */
 export function hash(value: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < value.length; i++) {
@@ -143,132 +190,11 @@ export function hash(value: string): number {
   return h >>> 0;
 }
 
-/** mulberry32 — small, fast, repeatable given a seed. */
-export function rng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function archetypeFor(seed: number): Archetype {
-  const roll = seed % 100;
-  if (roll < 26) return 'tower';
-  if (roll < 44) return 'deco';
-  if (roll < 66) return 'block';
-  if (roll < 81) return 'glass';
-  if (roll < 92) return 'hall';
-  return 'warehouse';
-}
-
-/** Footprint span and height multiplier per archetype. */
-export const ARCHETYPE: Record<Archetype, { w: number; d: number; rise: number; floors: number }> = {
-  tower: { w: 4.1, d: 4.1, rise: 1.15, floors: 1.05 },
-  deco: { w: 3.5, d: 3.5, rise: 1.28, floors: 1.0 },
-  block: { w: 5.2, d: 4.3, rise: 0.78, floors: 1.0 },
-  glass: { w: 4.4, d: 4.4, rise: 1.0, floors: 0.95 },
-  hall: { w: 5.4, d: 4.6, rise: 0.46, floors: 1.15 },
-  warehouse: { w: 5.6, d: 3.6, rise: 0.3, floors: 1.2 },
-};
-
-/**
- * planCity lays providers out on the street grid. Placement comes from a hash
- * of the provider id, NOT from live traffic: a building must not move when a
- * request lands. Heights are computed at draw time from `level`.
- */
-export function planCity(ids: string[], seed: number): CityPlan {
-  const n = Math.max(1, ids.length);
-  const cols = Math.max(1, Math.min(7, Math.ceil(Math.sqrt(n * 1.35))));
-  const rows = Math.max(1, Math.ceil(n / cols));
-  const w = cols * BLOCK + (cols + 1) * ROAD;
-  const d = rows * BLOCK + (rows + 1) * ROAD;
-
-  const roadX: number[] = [];
-  const roadY: number[] = [];
-  for (let c = 0; c <= cols; c++) roadX.push(ROAD / 2 + c * PITCH);
-  for (let r = 0; r <= rows; r++) roadY.push(ROAD / 2 + r * PITCH);
-
-  const blocks: CityPlan['blocks'] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      blocks.push({ x: ROAD + c * PITCH, y: ROAD + r * PITCH, w: BLOCK, d: BLOCK });
-    }
-  }
-
-  // Stable order: the provider list sorted by id, so two renders of the same
-  // keys grow the same city whatever order the API returned the accounts in.
-  // Blocks are filled in a seeded order, which leaves the spare blocks (parks)
-  // scattered instead of strung along the last row.
-  const order = [...ids].sort();
-  const filling = blocks
-    .map((_, i) => i)
-    .sort((a, b) => hash(`${seed}:block:${a}`) - hash(`${seed}:block:${b}`))
-    .slice(0, Math.min(order.length, blocks.length));
-  const taken = new Set(filling);
-  const slots: Slot[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    if (!taken.has(i)) continue;
-    const block = blocks[i];
-    const id = order[filling.indexOf(i)];
-    const s = hash(`${id}:${seed}`);
-    const pick = rng(s);
-    const kind = archetypeFor(s);
-    const arch = ARCHETYPE[kind];
-    const jitter = 0.55;
-    const availW = BLOCK - 2 * SETBACK;
-    const availD = BLOCK - 2 * SETBACK;
-    const bw = Math.min(availW, arch.w + (pick() - 0.5) * jitter);
-    const bd = Math.min(availD, arch.d + (pick() - 0.5) * jitter);
-    slots.push({
-      id, block,
-      x: block.x + SETBACK + (availW - bw) * pick(),
-      y: block.y + SETBACK + (availD - bd) * pick(),
-      w: bw, d: bd,
-      archetype: kind, tint: Math.floor(pick() * 4), seed: s,
-    });
-  }
-
-  // Blocks with no provider become parks. More than three and the outskirts
-  // read as empty land, which is honest — those blocks hold no keys.
-  const used = new Set(slots.map((s) => `${s.block.x}:${s.block.y}`));
-  const spare = blocks.filter((b) => !used.has(`${b.x}:${b.y}`));
-  const parks: Park[] = spare.map((b) => ({
-    x: b.x, y: b.y, w: b.w, d: b.d,
-    seed: hash(`${b.x}:${b.y}:${seed}`), pond: hash(`${b.x}:${b.y}`) % 3 === 0,
-  }));
-
-  const trees: Tree[] = [];
-  for (const p of parks) {
-    const pick = rng(p.seed);
-    for (let i = 0; i < 7; i++) {
-      trees.push({ x: p.x + 0.9 + pick() * (p.w - 1.8), y: p.y + 0.9 + pick() * (p.d - 1.8), seed: i });
-    }
-  }
-  // Two street trees per occupied block keep the sidewalks alive.
-  for (const s of slots) {
-    const pick = rng(s.seed ^ 0x9e37);
-    trees.push({ x: s.block.x + 0.6, y: s.block.y + s.block.d - 0.6, seed: 1 });
-    trees.push({ x: s.block.x + s.block.w - 0.6, y: s.block.y + 0.6, seed: 2 });
-    if (pick() > 0.6) trees.push({ x: s.x + s.w + 0.5, y: s.y + 0.4, seed: 3 });
-  }
-
-  return { seed, w, d, roadX, roadY, blocks, slots, parks, trees };
-}
-
-// ── isometric projection ──────────────────────────────────────────────────
-// screen.x = (x - y) * TU/2      screen.y = (x + y) * TU/4 - z * Z
-export const TU = 40;          // tile unit: one tile step is TU/2 across
-export const Z = 17;           // one height unit, in world pixels
-
-export function isoX(x: number, y: number): number { return (x - y) * (TU / 2); }
-export function isoY(x: number, y: number, z = 0): number { return (x + y) * (TU / 4) - z * Z; }
-
-/** Building height in world units for a provider at a given traffic level. */
-export function buildingHeight(level: number, state: State, rise: number): number {
-  if (state === 'off') return 2.2;
-  const base = 3.4 + level * 16.5 * rise;
-  return state === 'unknown' ? Math.min(base, 5.4) : base;
+/** One line for a building's sign: its number, or its state in words. */
+export function signLine(b: Building, short: (n: number) => string): string {
+  if (b.health === 'off') return 'switched off';
+  if (b.health === 'unknown') return 'usage unavailable';
+  if (b.health === 'failing') return `${Math.round((b.errors / Math.max(1, b.calls)) * 100)}% failing`;
+  if (b.health === 'quiet') return 'quiet';
+  return `${short(Math.round(b.tpm))} tok/min`;
 }

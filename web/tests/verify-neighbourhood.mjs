@@ -1,238 +1,202 @@
-// Neighbourhood proof: serves the BUILT dashboard against fixtures and checks
-// that the city tells the truth — height and window light follow tokens per
-// minute, a disabled provider is boarded up, a failing one gets weather, the
-// table prints exact figures, one live call flares exactly one building, and
-// reduced motion still renders the whole city.
-// Build first (`npm run build`), then: node tests/verify-neighbourhood.mjs
+// Neighbourhood scene (docs/design/neighbourhood-design.md): failing providers
+// stand in the front row, heights follow traffic linearly, every building has a
+// sign that nothing covers, red appears on the canvas only when something is
+// failing, both modes and both scales work, a still scene stops drawing, and
+// the phone layout fits. Runs against the built web/dist (see mockdash.mjs).
 import { start, json, check, finish, account } from "./mockdash.mjs";
 
-const key = (id, label, hint, enabled = true) => ({ id, label, hint, enabled, last_test_ok: true });
+const key = (id, hint, enabled = true) => ({ id, label: `key ${id}`, hint, enabled, last_test_ok: true });
+const acct = (id, name, ns, o = {}) => ({ ...account, id, name, namespace: ns, keys: [key(id, `h${id}`)], ...o });
 const accounts = [
-  { ...account, id: 1, name: "Alpha Gateway", namespace: "alpha", keys: [key(1, "busy", "sk…aaaa")] },
-  { ...account, id: 2, name: "Beta Works", namespace: "beta", keys: [key(2, "quiet", "sk…bbbb")] },
-  { ...account, id: 3, name: "Gamma Cloud", namespace: "gamma", keys: [key(3, "flaky", "sk…cccc")] },
-  { ...account, id: 4, name: "Delta Offline", namespace: "delta", keys: [key(4, "retired", "sk…dddd", false)] },
+  acct(1, "OpenRouter", "openrouter"), acct(2, "DeepSeek", "deepseek"), acct(3, "Claude Pro/Max", "claude-sub"),
+  acct(4, "Groq", "groq"), acct(5, "OpenAI Platform", "openai"), acct(6, "OpenCode Go", "opencode-go"),
+  acct(7, "Ollama (local)", "ollama", { enabled: false }),
 ];
-const row = (k, calls, tin, tout, errors) => ({ k, calls, tin, tout, errors, cread: 0, cwrite: 0, reasoning: 0, saved: 0, context_pre: 0, context_saved: 0, p50_ttft_ms: 0, applied_saved: 0 });
-// The second and later polls report double the tokens, so the page has to show
-// what moved since the last update.
-let usagePolls = 0;
-// Like the server: group_by=account keys on the provider ID, group_by=key on
-// the key hint; a poll is counted once, on its provider read.
-const usageFor = (groupBy) => {
-  if (groupBy !== "key") usagePolls += 1;
-  const scale = Math.max(1, usagePolls); // each poll moves the figures, so a trend appears
-  const [alpha, gamma] = groupBy === "key" ? ["sk…aaaa", "sk…cccc"] : ["alpha", "gamma"];
-  return { groups: [row(alpha, 40, 90000 * scale, 30000 * scale, 0), row(gamma, 8, 4000, 1000, 4)], totals: {} };
-};
+// tin is tokens over five minutes, so tokens/min = tin / 5.
+const row = (k, tpm, calls, errors) => ({ k, calls, tin: tpm * 5, tout: 0, errors, cread: 0, cwrite: 0, reasoning: 0, saved: 0, context_pre: 0, context_saved: 0, p50_ttft_ms: 0, applied_saved: 0 });
+const BUSY = [row("openrouter", 198000, 120, 2), row("deepseek", 64000, 40, 0), row("claude-sub", 46000, 12, 0), row("groq", 9600, 30, 12), row("openai", 220, 4, 4)];
+const CALM = BUSY.map((g) => ({ ...g, errors: 0 }));
 
-// One committed call for Alpha, delivered on the live feeder.
-const streamBody = [
-  `event: snapshot\ndata: ${JSON.stringify({ calls: [], ts: new Date().toISOString() })}\n\n`,
-  `event: calls\ndata: ${JSON.stringify({ calls: [{ ts: new Date().toISOString(), client: "x", surface: "openai", alias: "a", account: "Alpha Gateway", model: "m", status: 200, stream: false, tin: 4000, tout: 500 }], ts: new Date().toISOString() })}\n\n`,
-].join("");
-
+let groups = BUSY, usageFails = false;
 const handler = async (route, url) => {
   if (url.pathname === "/admin/accounts") { await json(route, accounts); return true; }
-  if (url.pathname === "/admin/usage") { await json(route, usageFor(url.searchParams.get("group_by"))); return true; }
-  if (url.pathname === "/admin/stream") {
-    await route.fulfill({ status: 200, contentType: "text/event-stream", body: streamBody });
-    return true;
+  if (url.pathname === "/admin/usage") {
+    if (usageFails) { await json(route, { error: { message: "down" } }, 503); return true; }
+    await json(route, { groups: url.searchParams.get("group_by") === "key" ? [] : groups, totals: {} }); return true;
   }
   return false;
 };
-
+const sign = (page, id) => page.locator(`[data-building="${id}"]`);
+const attr = async (page, id, a) => sign(page, id).getAttribute(a);
+// Red pixels on the canvas: the failing red (#ef4f63) and its dim flicker (#7a2a35).
+const redPixels = (page) => page.locator("canvas").evaluate((c) => {
+  const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+    if ((Math.abs(r - 239) < 14 && Math.abs(g - 79) < 14 && Math.abs(b - 99) < 14) || (Math.abs(r - 122) < 10 && Math.abs(g - 42) < 10 && Math.abs(b - 53) < 10)) n++;
+  }
+  return n;
+});
+const errors = [];
 const t = await start();
-// Point at a building's published roof: the least-occluded part of its
-// silhouette. Hovering the polygon's centre can land on a nearer tower's hit
-// target — a real visitor avoids that by clicking what they can see.
-const hoverBuilding = async (page, id) => {
-  const [rx, ry] = await page.locator(`[data-building="${id}"]`).evaluate((el) => el.dataset.roof.split(",").map(Number));
-  const canvas = page.locator("canvas");
-  await canvas.scrollIntoViewIfNeeded();
-  const box = await canvas.boundingBox();
-  await page.mouse.move(box.x + rx, box.y + ry);
+const open = async (opts = {}, setup) => {
+  const page = await t.page(handler, opts);
+  page.on("pageerror", (e) => errors.push(e.message));
+  if (setup) await page.addInitScript(setup);
+  await page.goto(`${t.base}/neighbourhood`);
+  await page.locator("[data-building]").first().waitFor();
+  await page.waitForTimeout(600);
+  return page;
 };
-for (const reduced of [false, true]) {
-  usagePolls = 0;
-  const page = await t.page(handler);
-  if (reduced) await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto(`${t.base}/neighbourhood`);
-  await page.waitForSelector("[data-building]");
-  const tag = reduced ? " (reduced motion)" : "";
-  const buildings = await page.$$eval("[data-building]", (els) => els.map((e) => ({
-    id: e.dataset.building, state: e.dataset.state, level: Number(e.dataset.level),
-    tpm: Number(e.dataset.tpm), storm: e.dataset.storm,
-  })));
-  const by = (id) => buildings.find((b) => b.id === id);
-  check("one building per provider" + tag, buildings.length === 4, buildings.length);
-  check("busiest provider is lit and brightest" + tag,
-    by("1")?.state === "live" && by("1").level > 0.9 && by("1").level > by("3").level, by("1"));
-  check("idle provider is quiet, level 0" + tag, by("2")?.state === "idle" && by("2").level === 0, by("2"));
-  check("disabled provider is dark despite ledger rows" + tag, by("4")?.state === "off" && by("4").level === 0, by("4"));
-  check("failing provider gets weather" + tag, by("3")?.storm === "1" && by("1")?.storm === "0", by("3"));
-  check("every building gets a hit target inside the stage" + tag, await page.evaluate(() => {
-    const stage = document.querySelector(".nbhd-city")?.getBoundingClientRect();
-    if (!stage) return false;
-    return [...document.querySelectorAll("[data-building]")].every((el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 && r.left >= stage.left - 1 && r.right <= stage.right + 1
-        && r.top >= stage.top - 1 && r.bottom <= stage.bottom + 1;
-    });
-  }));
 
-  // The canvas is the city: it must have painted something, and the light on it
-  // must be data (a serving provider leaves warm pixels; a dark one does not).
-  const painted = await page.evaluate(() => {
-    const c = document.querySelector("canvas");
-    const ctx = c.getContext("2d");
-    const { data } = ctx.getImageData(0, 0, c.width, c.height);
-    let solid = 0, warm = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] > 8) solid++;
-      // warm = clearly more red than blue: window light, not sky or asphalt
-      if (data[i] > 150 && data[i] > data[i + 2] + 40) warm++;
+try {
+  groups = BUSY;
+  const page = await open({}, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+
+  // Rows follow state: failing in front, switched off at the back.
+  check("failing providers stand in the front row", (await attr(page, 4, "data-row")) === "0" && (await attr(page, 5, "data-row")) === "0"
+    && (await attr(page, 4, "data-health")) === "failing" && (await attr(page, 5, "data-health")) === "failing");
+  check("serving providers stand behind them", (await attr(page, 1, "data-row")) === "1" && (await attr(page, 1, "data-health")) === "serving");
+  check("a switched-off provider stands at the back", Number(await attr(page, 7, "data-row")) === Math.max(...(await page.locator("[data-building]").evaluateAll((els) => els.map((e) => Number(e.dataset.row))))));
+
+  // Linear height: the busiest sets 200k; 220 tok/min is one storey, not 44% of the tower.
+  check("the busiest provider sets the scale, rounded up", (await page.locator(".nbhd-scene").getAttribute("data-ceiling")) === "200000");
+  check("heights are linear in tokens per minute", (await attr(page, 1, "data-floors")) === "24" && (await attr(page, 2, "data-floors")) === "8" && (await attr(page, 3, "data-floors")) === "6");
+  check("a small provider is one storey, still visible", (await attr(page, 5, "data-floors")) === "1");
+
+  // Signs: one per building, the right words, none overlapping, all inside the scene.
+  check("every building has a sign", (await page.locator("[data-building]").count()) === accounts.length);
+  check("a failing sign says how much is failing", (await sign(page, 4).innerText()).includes("40% failing") && (await sign(page, 5).innerText()).includes("100% failing"));
+  check("a serving sign gives tokens per minute", (await sign(page, 1).innerText()).includes("198,000"));
+  check("a switched-off sign says so", (await sign(page, 7).innerText()).includes("switched off") && (await sign(page, 6).innerText()).includes("quiet"));
+  const layout = async (p) => p.evaluate(() => {
+    const scene = document.querySelector(".nbhd-scene").getBoundingClientRect();
+    const r = [...document.querySelectorAll("[data-building]")].map((e) => e.getBoundingClientRect());
+    let overlaps = 0;
+    for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
+      if (r[i].left < r[j].right && r[j].left < r[i].right && r[i].top < r[j].bottom && r[j].top < r[i].bottom) overlaps++;
     }
-    return { solid, warm, total: data.length / 4 };
+    const outside = r.filter((b) => b.top < scene.top - 1 || b.left < scene.left - 1 || b.right > scene.right + 1 || b.bottom > scene.bottom + 1).length;
+    return { overlaps, outside };
   });
-  check("city is painted on the canvas" + tag, painted.solid > painted.total * 0.15, painted);
-  check("serving provider puts warm light on the canvas" + tag, painted.warm > 40, painted.warm);
+  const l1 = await layout(page);
+  check("no two signs overlap", l1.overlaps === 0, l1);
+  check("every sign is inside the scene", l1.outside === 0, l1);
 
-  // Every tower is painted where the plan says it is: sample the canvas at the
-  // roof point the scene publishes for each building.
-  const roofs = await page.evaluate(() => {
-    const c = document.querySelector("canvas");
-    const ctx = c.getContext("2d");
-    const sx = c.width / c.clientWidth, sy = c.height / c.clientHeight;
-    const at = (x, y) => { const d = ctx.getImageData(Math.round(x * sx), Math.round(y * sy), 1, 1).data; return d[3]; };
-    const rows = [...document.querySelectorAll("[data-building]")].map((el) => {
-      const [x, y] = el.dataset.roof.split(",").map(Number);
-      return { id: el.dataset.building, roof: at(x, y) };
-    });
-    return { rows, sky: at(4, 4) };
-  });
-  check("every roof is painted at its published point" + tag, roofs.rows.every((r) => r.roof > 40), roofs.rows);
-  check("the canvas leaves the sky transparent" + tag, roofs.sky === 0, roofs.sky);
-
-  const tableText = await page.locator("table").innerText();
-  check("table prints exact figures, unabbreviated" + tag,
-    tableText.includes("24,000") && !/\d(k|K)\b/.test(tableText), tableText.slice(0, 160));
-  check("table mirrors the city" + tag, (await page.locator("tbody tr").count()) === 4);
-
-  // Point at a building the scene really exposes. A taller tower in front can
-  // cover the one behind it, and the front building rightly gets the click —
-  // keyboard focus and the table still reach every building.
-  await page.locator("canvas").scrollIntoViewIfNeeded();
-  const hoverable = await page.evaluate(() => {
-    const c = document.querySelector("canvas").getBoundingClientRect();
-    for (const el of document.querySelectorAll("[data-building]")) {
-      const [x, y] = el.dataset.roof.split(",").map(Number);
-      const hit = document.elementFromPoint(c.left + x, c.top + y);
-      if (hit && hit.closest("[data-building]") === el) return el.dataset.building;
-    }
-    return null;
-  });
-  check("the scene exposes a building to the pointer" + tag, hoverable !== null, hoverable);
-  if (hoverable) {
-    const name = accounts.find((a) => String(a.id) === hoverable)?.name ?? "";
-    await hoverBuilding(page, hoverable);
-    check("hovering a building highlights its table row" + tag,
-      await page.locator(`tr[data-row="${hoverable}"]`).evaluate((e) => e.className.includes("bg-hover")));
-    check("inspector names the hovered provider" + tag,
-      (await page.getByLabel("Selected building").innerText()).includes(name));
-  }
-  await page.locator('[data-building="4"]').focus();
-  check("disabled provider says so in the inspector" + tag,
-    (await page.getByLabel("Selected building").innerText()).includes("disabled"));
-
-  await page.locator('[data-building="2"]').focus();
-  await page.keyboard.press("Enter");
-  check("keyboard selects a building" + tag,
-    (await page.locator('[data-building="2"]').getAttribute("aria-pressed")) === "true");
-
-  if (!reduced) {
-    await page.locator('[data-building="1"]').focus();
-    const frames = Number(await page.locator("canvas").getAttribute("data-frames"));
-    const before = await page.locator("canvas").evaluate((c) => c.toDataURL());
-    await page.waitForTimeout(900);
-    const after = await page.locator("canvas").evaluate((c) => c.toDataURL());
-    check("traffic animates the canvas", before !== after);
-    check("the frame loop is running", Number(await page.locator("canvas").getAttribute("data-frames")) > frames);
-    check("a live call flares its provider",
-      Number(await page.locator("canvas").getAttribute("data-pulses")) >= 1,
-      await page.locator("canvas").getAttribute("data-pulses"));
-    check("live request rate is shown", /requests \/ min/.test(await page.locator(".nbhd-toolbar").innerText()));
-
-    // The scene has a life of its own: people on the pavements, a flight
-    // overhead, weather that is occasional rather than constant. The dataset
-    // counters are the contract the drivers read.
-    const peds = Number(await page.locator("canvas").getAttribute("data-peds"));
-    check("people walk the pavements", peds >= 4, peds);
-    await page.waitForFunction(() => Number(document.querySelector("canvas").dataset.planes) >= 1, null, { timeout: 25_000 });
-    check("a plane crosses the sky", Number(await page.locator("canvas").getAttribute("data-planes")) >= 1);
-    check("the sky starts clear — rain is occasional",
-      (await page.locator("canvas").getAttribute("data-weather")) === "clear",
-      await page.locator("canvas").getAttribute("data-weather"));
-    check("lit windows throw their light down the street at night",
-      Number(await page.locator("canvas").getAttribute("data-reflect")) >= 1,
-      await page.locator("canvas").getAttribute("data-reflect"));
-
-    await page.locator('[data-wx="rain"]').click();
-    await page.waitForFunction(() => document.querySelector("canvas").dataset.weather === "rain", null, { timeout: 4_000 });
-    check("rain can be commanded over the city",
-      (await page.locator("canvas").getAttribute("data-weather")) === "rain"
-      && (await page.locator(".nbhd-city").getAttribute("data-weather")) === "rain");
-    check("rain cools the scene", await page.locator(".nbhd-city-canvas").evaluate((e) => getComputedStyle(e).filter.includes("saturate")));
-    await page.locator('[data-wx="clear"]').click();
-    await page.waitForFunction(() => document.querySelector("canvas").dataset.weather === "clear", null, { timeout: 4_000 });
-    check("the sky can be held clear", (await page.locator("canvas").getAttribute("data-weather")) === "clear");
-    await page.locator('[data-wx="auto"]').click();
-
-    // The trend column: a figure that moved since the last update leaves a
-    // direction beside it, in the table and in the inspector.
-    await page.evaluate(() => {
-      Object.defineProperty(document, "hidden", { value: false, configurable: true });
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await page.waitForFunction(() => /[▲▼]/.test(document.querySelector("table tbody").innerText), null, { timeout: 6_000 });
-    check("the table shows what moved since the last update",
-      /[▲▼]/.test(await page.locator("table tbody").innerText()));
-    await page.locator('[data-building="1"]').focus();
-    check("the inspector names the change",
-      /up since the last update/.test(await page.getByLabel("Selected building").innerText()));
-
-    await page.getByRole("button", { name: "Pause traffic", exact: true }).click();
-    await page.mouse.move(2, 2);
-    await page.waitForTimeout(250);
-    const a = await page.locator("canvas").evaluate((c) => c.toDataURL());
-    await page.waitForTimeout(600);
-    const b = await page.locator("canvas").evaluate((c) => c.toDataURL());
-    check("paused scene stops drawing", a === b);
-    await page.getByRole("button", { name: "Resume traffic", exact: true }).click();
-  }
-  check("no page overflow" + tag, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  check("legend and refresh time shown" + tag, /updated/.test(await page.locator(".nbhd ul", { hasText: "updated" }).first().innerText()));
-  check("nav entry present" + tag, (await page.getByRole("link", { name: /Neighbourhood/ }).count()) > 0);
-  if (!reduced) {
-    await page.waitForTimeout(400);
-    await page.screenshot({ path: process.env.SHOT ?? "/tmp/neighbourhood.png" });
-  }
+  // Red means failing: red pixels on the canvas with failures, none without.
+  await page.getByRole("group", { name: "City mode" }).getByRole("button", { name: "Status" }).click();
+  check("red is drawn while providers fail", (await redPixels(page)) > 50);
   await page.context().close();
-}
-// Daylight: the window reflections on the street are a night effect. A wet day
-// keeps its own sheen, but clear daylight carries no light pools.
-{
-  usagePolls = 0;
-  const page = await t.page(handler);
-  await page.addInitScript(() => localStorage.setItem("ezllm.theme", "light"));
-  await page.goto(`${t.base}/neighbourhood`);
-  await page.waitForSelector("[data-building]");
-  await page.waitForTimeout(1_300);
-  check("daylight streets carry no window reflections",
-    Number(await page.locator("canvas").getAttribute("data-reflect")) === 0,
-    await page.locator("canvas").getAttribute("data-reflect"));
-  await page.context().close();
-}
 
-await t.close();
+  groups = CALM;
+  const calm = await open({}, () => { try { localStorage.clear(); localStorage.setItem("ezllm.city.paused", "1"); } catch {} });
+  check("nothing failing: no failing signs", (await calm.locator('[data-health="failing"]').count()) === 0);
+  check("nothing failing: no red anywhere on the canvas", (await redPixels(calm)) === 0, await redPixels(calm));
+  await calm.context().close();
+
+  // Modes and scale.
+  groups = BUSY;
+  const m = await open({}, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+  await m.getByRole("group", { name: "City mode" }).getByRole("button", { name: "Show" }).click();
+  await m.waitForTimeout(400);
+  check("Show mode is set on the scene", (await m.locator(".nbhd-scene").getAttribute("data-mode")) === "show");
+  check("Show mode keeps failing signs full size and shrinks the rest",
+    (await attr(m, 4, "data-big")) === "1" && (await attr(m, 2, "data-big")) === "0");
+  check("Show mode keeps the same numbers", (await attr(m, 1, "data-floors")) === "24" && (await attr(m, 4, "data-health")) === "failing");
+  const scale = m.getByRole("group", { name: "Height scale" });
+  await scale.getByLabel("Fixed full height, tokens per minute").fill("100000");
+  await scale.getByLabel("Fixed full height, tokens per minute").press("Enter");
+  await m.waitForTimeout(300);
+  check("a fixed ceiling sets the scale", (await m.locator(".nbhd-scene").getAttribute("data-ceiling")) === "100000");
+  check("over a fixed ceiling is full height; the rest scale to it", (await attr(m, 1, "data-floors")) === "24" && (await attr(m, 2, "data-floors")) === "15");
+  await m.reload(); await m.locator("[data-building]").first().waitFor();
+  check("the fixed ceiling and the mode are remembered", (await m.locator(".nbhd-scene").getAttribute("data-ceiling")) === "100000" && (await m.locator(".nbhd-scene").getAttribute("data-mode")) === "show");
+  await m.getByRole("group", { name: "Height scale" }).getByRole("button", { name: "busiest" }).click();
+  await m.waitForTimeout(300);
+  check("busiest brings the scale back", (await m.locator(".nbhd-scene").getAttribute("data-ceiling")) === "200000");
+
+  // Selecting: a sign selects its building, again deselects.
+  await sign(m, 2).click();
+  check("clicking a sign selects the building", (await attr(m, 2, "aria-pressed")) === "true" && (await m.getByLabel("Selected building").innerText()).includes("64,000"));
+  await sign(m, 2).click();
+  check("clicking it again closes the details", (await m.getByLabel("Selected building").count()) === 0);
+  await sign(m, 3).focus(); await m.keyboard.press("Enter");
+  check("the keyboard selects a building", (await attr(m, 3, "aria-pressed")) === "true");
+
+  // A still scene stops drawing; a moving one keeps drawing.
+  const frame = (p) => p.locator("canvas").evaluate((c) => c.toDataURL());
+  const a1 = await frame(m); await m.waitForTimeout(400); const a2 = await frame(m);
+  check("a moving scene keeps drawing", a1 !== a2);
+  await m.getByRole("button", { name: "Pause" }).click();
+  await m.waitForTimeout(300);
+  const p1 = await frame(m); await m.waitForTimeout(600); const p2 = await frame(m);
+  check("a paused scene stops drawing", p1 === p2 && (await m.locator(".nbhd-scene").getAttribute("data-still")) === "1");
+  await m.context().close();
+
+  const rm = await open({ reducedMotion: "reduce" }, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+  const r1 = await frame(rm); await rm.waitForTimeout(600); const r2 = await frame(rm);
+  check("reduced motion draws one still frame", r1 === r2 && (await rm.locator(".nbhd-scene").getAttribute("data-still")) === "1");
+  check("reduced motion still shows failure in red", (await redPixels(rm)) > 50);
+  await rm.context().close();
+
+  // Light theme: the scene is the same night scene, signs still readable.
+  const lt = await open({ colorScheme: "light" }, () => { try { localStorage.clear(); localStorage.setItem("ezllm.theme", "light"); } catch {} });
+  const l2 = await layout(lt);
+  check("light theme: signs fit and do not overlap", l2.overlaps === 0 && l2.outside === 0, l2);
+  await lt.context().close();
+
+  // Phone: two per row, every sign inside, no sideways page scroll.
+  const ph = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+  const l3 = await layout(ph);
+  check("phone: signs fit and do not overlap", l3.overlaps === 0 && l3.outside === 0, l3);
+  check("phone: no sideways scroll", await ph.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
+  const phoneRows = await ph.locator("[data-building]").evaluateAll((els) => els.map((e) => e.dataset.row));
+  check("phone: rows hold at most two buildings", Object.values(phoneRows.reduce((m, r) => ({ ...m, [r]: (m[r] ?? 0) + 1 }), {})).every((n) => n <= 2) && phoneRows.filter((r) => r === "0").length === 2, phoneRows);
+  check("phone: failing signs keep their number", (await sign(ph, 4).innerText()).includes("40% failing") && (await attr(ph, 2, "data-big")) === "0");
+  await ph.context().close();
+
+  // A crowded city: eight long names at the same height would overlap without nudging.
+  const crowdNames = ["Alibaba Cloud Model Studio", "Xiaomi MiMo token plan", "Cloudflare Workers AI", "Vercel AI Gateway", "NVIDIA NIM endpoints", "Google AI Studio keys", "Ollama Cloud tier", "TokenRouter backup"];
+  const savedAccounts = accounts.splice(0, accounts.length, ...crowdNames.map((n, i) => acct(20 + i, n, `crowd${i}`)));
+  groups = crowdNames.map((_, i) => row(`crowd${i}`, 50000, 10, 0));
+  for (const vp of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    const cr = await open({ viewport: vp }, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+    const lc = await layout(cr);
+    check(`crowded city at ${vp.width}px: no two signs overlap, all inside`, lc.overlaps === 0 && lc.outside === 0, lc);
+    await cr.context().close();
+  }
+  // 21 providers on a high-density phone (failing and switched off among them):
+  // the sign fit settles instead of looping (React "maximum update depth").
+  const bigNames = ["Alibaba Token Plan", "Antigravity", "ChatGPT Subscription", "Claude Platform", "Claude Subscription", "Claude Web", "Cloudflare Workers AI", "Command Code", "DeepSeek", "GitHub Copilot", "Globex", "Google AI Studio", "Groq", "Mimo Token Plan", "NVIDIA NIM", "Ollama Cloud", "OpenAI", "OpenCode Go", "OpenRouter", "TokenRouter", "Vercel AI Gateway"];
+  const bigTpm = [0, 0, 30000, 12000, 80000, 0, 2000, 45000, 64000, 0, 0, 9000, 9600, 0, 3000, 0, 220, 15000, 198000, 0, 1200];
+  accounts.splice(0, accounts.length, ...bigNames.map((n, i) => acct(40 + i, n, `big${i}`, i === 1 ? { enabled: false } : {})));
+  groups = bigNames.map((_, i) => row(`big${i}`, bigTpm[i], i === 12 ? 30 : i === 16 ? 4 : Math.round(bigTpm[i] / 2000), i === 12 ? 12 : i === 16 ? 4 : 0));
+  const before = errors.length;
+  const big = await t.page(handler, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true });
+  const crash = [];
+  big.on("pageerror", (e) => crash.push(e.message));
+  big.on("console", (msg) => { if (msg.type() === "error") crash.push(msg.text()); });
+  await big.goto(`${t.base}/neighbourhood`);
+  await big.waitForTimeout(2500);
+  const bigLayout = await big.evaluate(() => ({ scene: !!document.querySelector(".nbhd-scene"), hidden: [...document.querySelectorAll("[data-building]")].filter((e) => e.style.visibility !== "visible").length, signs: document.querySelectorAll("[data-building]").length }));
+  check("21 providers on a phone: the scene settles and shows every sign", bigLayout.scene && bigLayout.signs === 21 && bigLayout.hidden === 0 && crash.length === 0, { ...bigLayout, crash: crash.slice(0, 2) });
+  await big.context().close();
+  errors.length = before;
+  accounts.splice(0, accounts.length, ...savedAccounts);
+  groups = BUSY;
+
+  // Usage unavailable: buildings are unknown, never quiet.
+  usageFails = true;
+  const un = await open({}, () => { try { if (!sessionStorage.getItem("cleared")) { localStorage.clear(); sessionStorage.setItem("cleared", "1"); } } catch {} });
+  check("no usage: buildings read as unavailable, not quiet", (await attr(un, 1, "data-health")) === "unknown" && (await sign(un, 1).innerText()).includes("usage unavailable"));
+  usageFails = false;
+  await un.context().close();
+
+  check("no page errors", errors.length === 0, errors);
+} catch (e) {
+  check("driver ran to completion", false, String(e));
+} finally {
+  await t.close();
+}
 finish();

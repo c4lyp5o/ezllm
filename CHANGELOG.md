@@ -4,6 +4,16 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Neighbourhood, redesigned.** The city now tells the truth at a glance. Height is
+  tokens per minute on a linear scale with a ruler (full height is the busiest
+  provider, or a ceiling you set). Lit windows are calls that worked and red windows
+  are calls that failed. A failing provider gets a red sign, a beacon and rain, and
+  stands in the front row; switched-off providers stand at the back. Every building
+  has a sign with its number, and signs never overlap. Each live request is a car,
+  red if it failed. **Status** mode is plain, for a screen left open; **Show** mode
+  adds the night sky over the same numbers. One line at the top says whether anything
+  is failing; the details card appears when you select a building; on a phone the
+  table becomes cards. Design: `docs/design/neighbourhood-design.md`.
 - **Neighbourhood**: a table row's **Requests** link now opens that provider's requests.
   It filtered by the provider's name, so it showed nothing when the name and the
   provider ID differ.

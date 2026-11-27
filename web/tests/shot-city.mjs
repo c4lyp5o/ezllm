@@ -61,7 +61,7 @@ try {
     });
     console.log(`${theme} ${viewport.width}: fps=${fps} ${JSON.stringify(geom)}`);
     await page.screenshot({ path: `${out}/city-${theme}-${viewport.width}.png`, fullPage: true });
-    await page.locator('.nbhd-city').screenshot({ path: `${out}/stage-${theme}-${viewport.width}.png` });
+    await page.locator('.nbhd-scene').screenshot({ path: `${out}/stage-${theme}-${viewport.width}.png` });
     check(`${theme} ${viewport.width}: draws at a usable rate`, fps >= 25, fps);
     await page.context().close();
   }
@@ -81,7 +81,7 @@ try {
       requestAnimationFrame(tick);
     }));
     console.log(`dark rain 1440: fps=${fps}`);
-    await page.locator('.nbhd-city').screenshot({ path: `${out}/stage-rain-1440.png` });
+    await page.locator('.nbhd-scene').screenshot({ path: `${out}/stage-rain-1440.png` });
     check('dark 1440 rain: draws at a usable rate', fps >= 25, fps);
     await page.context().close();
   }

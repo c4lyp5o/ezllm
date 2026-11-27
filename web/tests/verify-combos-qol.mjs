@@ -108,6 +108,7 @@ try {
   await dialog().getByRole('button', { name: 'Test model 2 again' }).waitFor();
   check('Test again re-probes one hop', /"hop":1/.test(calls[0] ?? ''), calls);
   await page.keyboard.press('Escape');
+  await dialog().waitFor({ state: 'detached' });
   await card('daily').getByText(/Tested .* 2 of 3 answered/).waitFor();
   check('card summarises the last full test', true);
 

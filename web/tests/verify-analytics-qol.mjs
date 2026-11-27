@@ -66,7 +66,7 @@ try {
   // ── Stats ──
   await tab('Stats').click();
   await page.getByText('Alpha').first().waitFor();
-  await page.getByText(/same as the previous 30 days/).first().waitFor({ timeout: 5000 }).catch(() => {});
+  await page.getByText(/same as the previous 30 days/).first().waitFor({ timeout: 15000 }).catch(() => {});
   check('stats: prior-period delta on the totals', (await page.getByText(/same as the previous 30 days/).count()) > 0);
   check('stats: 2x window requested for the comparison', seen.usage.some((u) => u.hours === 1440 && !u.group), seen.usage.slice(-4));
   const calls = page.getByRole('button', { name: /^calls/ });
@@ -86,6 +86,9 @@ try {
   // ── Economics ──
   await tab('Token Economics').click();
   await page.getByText('Counted as $0 until priced').waitFor();
+  // The cost report and the run-rate render after the heading; wait, then count.
+  await page.getByText('Beta · free-m').first().waitFor({ timeout: 15000 }).catch(() => {});
+  await page.getByText(/over 30 days at this rate/).first().waitFor({ timeout: 15000 }).catch(() => {});
   check('economics: unpriced models are named', (await page.getByText('Beta · free-m').count()) > 0);
   check('economics: run-rate shown', (await page.getByText(/over 30 days at this rate/).count()) > 0);
   seen.requests.length = 0;
@@ -108,8 +111,9 @@ try {
   await page.getByText(/showing 100 of 120/).waitFor();
   check('requests: show more raises the limit', seen.requests.some((u) => /limit=100/.test(u)), seen.requests);
   check('requests: limit lives in the URL', /limit=100/.test(page.url()), page.url());
+  const filtered = page.waitForRequest((r) => /\/admin\/requests\?.*account=Alpha/.test(r.url()), { timeout: 15000 }).catch(() => null);
   await page.getByLabel('provider').selectOption('Alpha');
-  await page.waitForTimeout(300);
+  await filtered;
   check('requests: provider dropdown filters server-side', seen.requests.some((u) => /account=Alpha/.test(u)) && /account=Alpha/.test(page.url()), page.url());
   await page.reload();
   await page.getByText(/showing/).waitFor();

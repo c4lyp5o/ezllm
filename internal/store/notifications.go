@@ -26,6 +26,7 @@ const (
 	NoteQuotaWarning         = "quota_warning"
 	NoteBalanceLow           = "balance_low"
 	NoteCookieExpiring       = "cookie_expiring"
+	NoteQuotaReadRefused     = "quota_read_refused"
 )
 
 // Notification is one bell entry.

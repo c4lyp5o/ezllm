@@ -4,6 +4,11 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Quieter warnings.** A low balance is said once each time it drops under your
+  threshold, not every day it stays there, and an empty balance reads 0.00, not -0.00.
+  A provider whose usage page refuses its sign-in is said once in the bell ("Can't read
+  … usage: its sign-in was refused") and isn't read again until you change its settings
+  or key; the log names the status, not the provider's reply.
 - **Get started with a subscription.** Step 1 asks how you pay: **I have an API key** or
   **I have a subscription**. With a subscription, each plan (Claude Pro/Max, ChatGPT
   Plus/Pro, GitHub Copilot, Google Antigravity) shows where it stands. A ready plan

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +26,7 @@ func TestQuotaAlertThresholdAndWindow(t *testing.T) {
 	v := settings.Defaults()
 	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
 	q := provider.Quota{Kind: provider.QuotaPercent, PercentRolling: pct(40), PercentWeekly: pct(85), WeeklyResetsAt: "2026-11-30T00:00:00Z", PercentMonthly: pct(80)}
-	got := quotaAlerts(7, "acme", q, v, now)
+	got := quotaAlerts(7, "acme", q, v, now, "")
 	if len(got) != 2 {
 		t.Fatalf("alerts = %+v, want weekly and monthly (80%% counts)", got)
 	}
@@ -36,26 +38,34 @@ func TestQuotaAlertThresholdAndWindow(t *testing.T) {
 		t.Fatalf("monthly dedup = %q", got[1].DedupKey)
 	}
 	v.AlertQuotaPct = 90
-	if got := quotaAlerts(7, "acme", q, v, now); len(got) != 0 {
+	if got := quotaAlerts(7, "acme", q, v, now, ""); len(got) != 0 {
 		t.Fatalf("under a 90%% threshold: %+v", got)
 	}
 	v = settings.Defaults()
 	v.NotifyQuota = false
-	if got := quotaAlerts(7, "acme", q, v, now); len(got) != 0 {
+	if got := quotaAlerts(7, "acme", q, v, now, ""); len(got) != 0 {
 		t.Fatalf("switched off: %+v", got)
 	}
 }
 
-// A balance under the threshold warns once a day.
+// A balance under the threshold warns once per drop: the warning is keyed on
+// the last read that saw it at or over the threshold, not on the day.
 func TestBalanceAlert(t *testing.T) {
 	v := settings.Defaults()
 	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
 	low := provider.Quota{Kind: provider.QuotaMoney, Balance: pct(1.5), BalanceUnit: "USD"}
-	got := quotaAlerts(7, "acme", low, v, now)
-	if len(got) != 1 || got[0].Kind != store.NoteBalanceLow || !strings.Contains(got[0].Title, "1.50 USD") || got[0].DedupKey != "balance_low:7:2026-11-26" {
+	got := quotaAlerts(7, "acme", low, v, now, "")
+	if len(got) != 1 || got[0].Kind != store.NoteBalanceLow || !strings.Contains(got[0].Title, "1.50 USD") || got[0].DedupKey != "balance_low:7:above:never" || !got[0].Once {
 		t.Fatalf("low balance = %+v", got)
 	}
-	if got := quotaAlerts(7, "acme", provider.Quota{Kind: provider.QuotaMoney, Balance: pct(2)}, v, now); len(got) != 0 {
+	again := quotaAlerts(7, "acme", low, v, now.Add(48*time.Hour), "")
+	if again[0].DedupKey != got[0].DedupKey {
+		t.Fatalf("two days on, still low: dedup %q, want %q", again[0].DedupKey, got[0].DedupKey)
+	}
+	if k := quotaAlerts(7, "acme", low, v, now, "2026-11-25T08:00:00.000Z")[0].DedupKey; k != "balance_low:7:above:2026-11-25T08:00:00.000Z" {
+		t.Fatalf("after a top-up: dedup %q", k)
+	}
+	if got := quotaAlerts(7, "acme", provider.Quota{Kind: provider.QuotaMoney, Balance: pct(2)}, v, now, ""); len(got) != 0 {
 		t.Fatalf("2.00 is not under 2.00: %+v", got)
 	}
 }
@@ -101,6 +111,119 @@ func TestAlertCheckSaysLowBalanceOnce(t *testing.T) {
 	}
 	if snaps != 3 {
 		t.Fatalf("quota reads saved = %d, want 3", snaps)
+	}
+}
+
+// An empty prepaid balance reads 0.00, not -0.00.
+func TestBalanceAlertNoNegativeZero(t *testing.T) {
+	got := quotaAlerts(7, "acme", provider.Quota{Kind: provider.QuotaMoney, Balance: pct(-0.0001), BalanceUnit: "USD"}, settings.Defaults(), time.Now(), "")
+	if len(got) != 1 || !strings.HasSuffix(got[0].Title, "down to 0.00 USD") {
+		t.Fatalf("title = %+v", got)
+	}
+	if got := quotaAlerts(7, "acme", provider.Quota{Kind: provider.QuotaMoney, Balance: pct(-1.5)}, settings.Defaults(), time.Now(), ""); !strings.Contains(got[0].Title, "-1.50") {
+		t.Fatalf("a real overdraft keeps its sign: %q", got[0].Title)
+	}
+}
+
+// A balance that stays empty is one warning across days and hourly checks;
+// after a top-up and a new drop it is said again.
+func TestAlertCheckSaysLowBalanceOncePerDrop(t *testing.T) {
+	var mu sync.Mutex
+	body := `{"balance":0,"unit":"USD"}`
+	setBody := func(b string) { mu.Lock(); body = b; mu.Unlock() }
+	upstream := func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		b := body
+		mu.Unlock()
+		(&fakeUpstream{models: []string{"m"}, quotaBody: b}).handler()(w, r)
+	}
+	h := settingsHarness(t, upstream)
+	day := time.Now()
+	rows := func() int {
+		var n int
+		if err := h.db.Reader().QueryRow(`SELECT COUNT(*) FROM notifications WHERE kind='balance_low'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for i := 0; i < 3; i++ {
+		h.server.checkAlerts(context.Background(), day.Add(time.Duration(i)*24*time.Hour))
+	}
+	if n := rows(); n != 1 {
+		t.Fatalf("empty for three days: %d warnings, want 1", n)
+	}
+	setBody(`{"balance":10,"unit":"USD"}`)
+	h.server.checkAlerts(context.Background(), day.Add(72*time.Hour))
+	setBody(`{"balance":1,"unit":"USD"}`)
+	h.server.checkAlerts(context.Background(), day.Add(73*time.Hour))
+	h.server.checkAlerts(context.Background(), day.Add(74*time.Hour))
+	if n := rows(); n != 2 {
+		t.Fatalf("topped up then low again: %d warnings, want 2", n)
+	}
+}
+
+// A usage page that refuses the sign-in is said once in the bell and logged
+// once at Info with its status only (filtered at Warn); it is not read again
+// until the provider's settings change. The provider's error body never
+// reaches the log.
+func TestAlertCheckStopsOnRefusedSignIn(t *testing.T) {
+	for _, tc := range []struct {
+		level slog.Level
+		want  bool
+	}{{slog.LevelInfo, true}, {slog.LevelWarn, false}} {
+		var reads atomic.Int32
+		upstream := func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/usage") {
+				reads.Add(1)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":{"message":"Your session has expired","code":"expired_session_key"}}`))
+				return
+			}
+			(&fakeUpstream{models: []string{"m"}}).handler()(w, r)
+		}
+		var buf bytes.Buffer
+		h := newHarness(t, upstream, func(o *Options) {
+			m, err := settings.New(context.Background(), o.DB, settings.Defaults(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			o.Settings = m
+			o.DB.SetOperatorSettings(m)
+			o.Log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: tc.level}))
+		})
+		for i := 0; i < 3; i++ {
+			h.server.checkAlerts(context.Background(), time.Now())
+		}
+		if n := reads.Load(); n != 1 {
+			t.Fatalf("usage page read %d times, want 1", n)
+		}
+		var rows int
+		var title string
+		if err := h.db.Reader().QueryRow(`SELECT COUNT(*), COALESCE(MAX(title),'') FROM notifications WHERE kind='quota_read_refused'`).Scan(&rows, &title); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 || !strings.Contains(title, "sign-in was refused") {
+			t.Fatalf("refused notes = %d %q, want one", rows, title)
+		}
+		out := buf.String()
+		if got := strings.Count(out, "alert check: quota sign-in refused"); got != map[bool]int{true: 1, false: 0}[tc.want] {
+			t.Fatalf("level %v: logged %d times\n%s", tc.level, got, out)
+		}
+		if tc.want && !strings.Contains(out, "status=401") {
+			t.Fatalf("no status in the log:\n%s", out)
+		}
+		if strings.Contains(out, "expired_session_key") || strings.Contains(out, "quota read failed") {
+			t.Fatalf("the provider's body reached the log:\n%s", out)
+		}
+		// A pasted cookie (any edit to the provider) earns one fresh read.
+		if _, err := h.db.Writer().Exec(`UPDATE accounts SET updated_at='2099-01-01T00:00:00.000Z'`); err != nil {
+			t.Fatal(err)
+		}
+		h.server.checkAlerts(context.Background(), time.Now())
+		h.server.checkAlerts(context.Background(), time.Now())
+		if n := reads.Load(); n != 2 {
+			t.Fatalf("after an edit: usage page read %d times, want 2", n)
+		}
 	}
 }
 
@@ -257,5 +380,16 @@ func TestRetentionSettingRange(t *testing.T) {
 		if err := v.Validate(); err != nil {
 			t.Errorf("%d days refused: %v", days, err)
 		}
+	}
+}
+
+// Any successful quota read (the Quota button, a key test) lifts a refusal,
+// so the hourly check reads that provider again.
+func TestQuotaReadLiftsRefusal(t *testing.T) {
+	h := settingsHarness(t, (&fakeUpstream{models: []string{"m"}}).handler())
+	h.server.quotaRefused.Store(int64(7), "mark")
+	h.server.alertQuota(7, "acme", provider.Quota{Kind: provider.QuotaNone})
+	if _, still := h.server.quotaRefused.Load(int64(7)); still {
+		t.Fatal("a good read left the provider refused")
 	}
 }

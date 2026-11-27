@@ -387,7 +387,7 @@ export default function Neighbourhood() {
             <td className="whitespace-nowrap px-3 py-2 text-[12px]">
               <Link className="text-mute hover:text-ink" to={providerLink(Number(b.id), 'open')} aria-label={`Open ${b.name}`}>Provider</Link>
               <span className="mx-1.5 text-mute/50" aria-hidden>·</span>
-              <Link className="text-mute hover:text-ink" to={`/requests?${new URLSearchParams({ account: b.name, range: '24h' })}`} aria-label={`Requests for ${b.name}`}>Requests</Link>
+              <Link className="text-mute hover:text-ink" to={`/requests?${new URLSearchParams({ account: b.namespace, range: '24h' })}`} aria-label={`Requests for ${b.name}`}>Requests</Link>
             </td>
           </tr>)}
           {ranked.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-center text-mute">No building matches. <button type="button" className="underline" onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filter</button></td></tr>}</tbody>

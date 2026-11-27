@@ -12,12 +12,14 @@ const accounts = [
   { ...account, id: 4, name: 'Delta Offline', namespace: 'delta', enabled: false, keys: [key(4, 'old', 'd')] },
 ];
 const row = (k, calls, tin, errors = 0) => ({ k, calls, tin, tout: 0, errors, cread: 0, cwrite: 0, reasoning: 0, saved: 0, context_pre: 0, context_saved: 0, p50_ttft_ms: 0, applied_saved: 0 });
-const usage = { groups: [row('a', 40, 120000), row('b', 8, 5000, 4)], totals: {} };
+// Like the server: group_by=account keys on the provider ID, group_by=key on the key hint.
+const usage = { groups: [row('alpha', 40, 120000), row('beta', 8, 5000, 4)], totals: {} };
+const keyUsage = { groups: [row('a', 40, 120000), row('b', 8, 5000, 4)], totals: {} };
 const froms = [];
 const t = await start();
 const page = await t.page(async (route, url) => {
   if (url.pathname === '/admin/accounts') { await json(route, accounts); return true; }
-  if (url.pathname === '/admin/usage') { froms.push(Date.now() - Date.parse(url.searchParams.get('from'))); await json(route, usage); return true; }
+  if (url.pathname === '/admin/usage') { froms.push(Date.now() - Date.parse(url.searchParams.get('from'))); await json(route, url.searchParams.get('group_by') === 'key' ? keyUsage : usage); return true; }
   return false;
 });
 const sortBtn = (label) => page.locator('th button', { hasText: new RegExp(`^${label}`) });
@@ -71,10 +73,12 @@ try {
   check('the inspector shows the error rate', (await insp.innerText()).includes('4 errors · 50%'));
   check('the inspector links to the provider, its requests and its keys',
     (await insp.getByRole('link', { name: 'Open provider' }).getAttribute('href')) === '/providers?open=2'
-    && (await insp.getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('account=Beta+Works')
+    && (await insp.getByRole('link', { name: 'View requests' }).getAttribute('href')).includes('account=beta&')
     && (await insp.getByRole('link', { name: 'Edit keys' }).getAttribute('href')) === '/providers?keys=2');
   check('the selection is in the URL', page.url().includes('select=2'));
   check('table rows link out too', (await page.locator('tr[data-row="1"]').getByRole('link', { name: 'Open Alpha Gateway' }).getAttribute('href')) === '/providers?open=1');
+  // The request history stores the provider ID, so that is what the filter names.
+  check('a table row links to its provider’s requests by provider ID', (await page.locator('tr[data-row="1"]').getByRole('link', { name: 'Requests for Alpha Gateway' }).getAttribute('href')).includes('account=alpha&'));
 
   // deep link
   await page.goto(`${t.base}/neighbourhood?select=3`);

@@ -4,6 +4,12 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+- **Neighbourhood**: a table row's **Requests** link now opens that provider's requests.
+  It filtered by the provider's name, so it showed nothing when the name and the
+  provider ID differ.
+- **Dashboard tests**: 29 more page tests run in CI. The stale ones now match the
+  current pages; `ranges`, `stats`, `preset-labels` and `theme` run on fixtures instead
+  of a live instance.
 - **Quieter warnings.** A low balance is said once each time it drops under your
   threshold, not every day it stays there, and an empty balance reads 0.00, not -0.00.
   A provider whose usage page refuses its sign-in is said once in the bell ("Can't read

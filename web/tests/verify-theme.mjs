@@ -11,11 +11,13 @@
 // differs. It also asserts the default is dark (no stored choice) and checks
 // body-text contrast against WCAG AA in both modes.
 //
-// Usage:  BASE=http://127.0.0.1:4174 node verify-theme.mjs
-//         (start it with `npx vite preview --port 4174` first)
+// Usage:  node tests/verify-theme.mjs   (the built web/dist, served by mockdash)
+//         BASE=http://127.0.0.1:4174 node tests/verify-theme.mjs   (any running dashboard)
 import { chromium } from 'playwright';
+import { start } from './mockdash.mjs';
 
-const BASE = process.env.BASE ?? 'http://127.0.0.1:4174';
+const mock = process.env.BASE ? null : await start();
+const BASE = process.env.BASE ?? mock.base;
 
 const VARS = [
   '--color-bg', '--color-surface', '--color-raised', '--color-ink', '--color-dim',
@@ -24,8 +26,9 @@ const VARS = [
   '--color-viz-out', '--color-viz-cached', '--color-viz-grid',
 ];
 
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+const browser = mock ? null : await chromium.launch();
+const page = mock ? await mock.page(null, { viewport: { width: 1440, height: 960 } }) : await browser.newPage({ viewport: { width: 1440, height: 960 } });
+const done = () => (mock ? mock.close() : browser.close());
 await page.goto(BASE, { waitUntil: 'load' });
 
 const read = () =>
@@ -45,7 +48,7 @@ console.log('default class   :', dark.__htmlClass);
 console.log('default body bg :', dark.__bodyBg, 'text:', dark.__bodyColor);
 if (!dark.__htmlClass.includes('dark')) {
   console.error('FAIL: the default theme is not dark — <html> should carry .dark');
-  await browser.close();
+  await done();
   process.exit(1);
 }
 
@@ -84,7 +87,7 @@ const cl = contrast(light.__bodyColor, light.__bodyBg);
 console.log('\nbody-text contrast dark  :', cd.toFixed(2), ':1');
 console.log('body-text contrast light :', cl.toFixed(2), ':1');
 
-await browser.close();
+await done();
 const failures = [];
 if (same > 0) failures.push(`${same} theme token(s) identical or unresolved between dark and light`);
 if (cd < 4.5) failures.push(`dark body-text contrast ${cd.toFixed(2)} below AA 4.5:1`);

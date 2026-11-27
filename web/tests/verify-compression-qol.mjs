@@ -26,7 +26,7 @@ const page = await t.page(async (route, url) => {
   if (p === '/admin/combos') { await json(route, combos); return true; }
   if (p === '/admin/usage') {
     const g = url.searchParams.get('group_by');
-    await json(route, { groups: g === 'alias' ? [{ k: 'daily', calls: 40, saved: 12000 }, { k: '(direct)', calls: 2, saved: 100 }] : [{ k: 'Groq', calls: 40, saved: 12000 }], totals: {} });
+    await json(route, { groups: g === 'alias' ? [{ k: 'daily', calls: 40, saved: 12000, applied_saved: 12000 }, { k: '(direct)', calls: 2, saved: 100, applied_saved: 100 }] : [{ k: 'Groq', calls: 40, saved: 12000, applied_saved: 12000 }], totals: {} });
     return true;
   }
   if (p === '/admin/requests') {

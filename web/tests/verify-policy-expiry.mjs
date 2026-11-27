@@ -1,5 +1,5 @@
-// Regression: saving the Policy modal without touching Expires must not send
-// expires_at (a date-only value is re-read as end of the server's local day,
+// Regression: saving the Policy modal with another change but Expires untouched
+// must not send expires_at (a date-only value is re-read as end of the server's local day,
 // moving the deadline). Changing or clearing the date still sends it.
 import { start, json, check, finish } from "./mockdash.mjs";
 
@@ -8,6 +8,7 @@ const dash = await start();
 try {
   for (const [name, edit, want] of [
     ["unchanged expiry is not sent", null, undefined],
+    // Save stays disabled until something changes, so the untouched case edits the allowlist.
     ["changed expiry is sent", "2026-12-20", "2026-12-20"],
     ["cleared expiry is sent", "", ""],
   ]) {
@@ -22,6 +23,7 @@ try {
     await page.goto(dash.base + "/connect");
     await page.getByRole("button", { name: "Policy", exact: true }).click();
     if (edit !== null) await page.getByRole("dialog").locator('input[type="date"]').fill(edit);
+    else await page.getByRole("dialog").locator("#pol-models").fill("mock/*");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
     check(name, posted !== undefined && posted.expires_at === want && posted.cap_tokens === 1000, posted);

@@ -17,10 +17,13 @@ const row = (k, calls, tin, tout, errors) => ({ k, calls, tin, tout, errors, cre
 // The second and later polls report double the tokens, so the page has to show
 // what moved since the last update.
 let usagePolls = 0;
-const usageFor = () => {
-  usagePolls += 1;
-  const scale = usagePolls; // each poll moves the figures, so a trend appears
-  return { groups: [row("sk…aaaa", 40, 90000 * scale, 30000 * scale, 0), row("sk…cccc", 8, 4000, 1000, 4)], totals: {} };
+// Like the server: group_by=account keys on the provider ID, group_by=key on
+// the key hint; a poll is counted once, on its provider read.
+const usageFor = (groupBy) => {
+  if (groupBy !== "key") usagePolls += 1;
+  const scale = Math.max(1, usagePolls); // each poll moves the figures, so a trend appears
+  const [alpha, gamma] = groupBy === "key" ? ["sk…aaaa", "sk…cccc"] : ["alpha", "gamma"];
+  return { groups: [row(alpha, 40, 90000 * scale, 30000 * scale, 0), row(gamma, 8, 4000, 1000, 4)], totals: {} };
 };
 
 // One committed call for Alpha, delivered on the live feeder.
@@ -31,7 +34,7 @@ const streamBody = [
 
 const handler = async (route, url) => {
   if (url.pathname === "/admin/accounts") { await json(route, accounts); return true; }
-  if (url.pathname === "/admin/usage") { await json(route, usageFor()); return true; }
+  if (url.pathname === "/admin/usage") { await json(route, usageFor(url.searchParams.get("group_by"))); return true; }
   if (url.pathname === "/admin/stream") {
     await route.fulfill({ status: 200, contentType: "text/event-stream", body: streamBody });
     return true;

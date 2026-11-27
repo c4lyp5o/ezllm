@@ -101,8 +101,10 @@ try {
   check('admin role shows its warning', (await dialog().getByText(/Keep it for yourself/).count()) === 1);
   check('ticking admin ticks nothing else', !(await dialog().getByRole('checkbox', { name: /Metrics/ }).isChecked()));
   await dialog().getByRole('checkbox', { name: /Admin/ }).uncheck();
-  await dialog().getByLabel('Allowed models', { exact: false }).first().fill('deep*');
+  await dialog().getByLabel('Allowed models', { exact: false }).first().fill('*chat');
   check('a glob that cannot cross / says it matches nothing', (await dialog().getByText(/Doesn't match any of the 4 models available right now/).count()) === 1);
+  await dialog().locator('#tk-models').fill('deep*');
+  check('a trailing * is a prefix across /, as on the server', (await dialog().getByText(/Matches 2 of 4 available models/).count()) === 1);
   await dialog().locator('#tk-models').fill('deepseek/*');
   check('the allowlist readout counts matches', (await dialog().getByText(/Matches 2 of 4 available models/).count()) === 1);
   await dialog().getByRole('button', { name: '90 days', exact: true }).click();

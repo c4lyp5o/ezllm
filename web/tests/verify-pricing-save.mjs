@@ -25,11 +25,11 @@ try {
   await page.goto(dash.base + "/providers");
   await page.getByText("Mock provider", { exact: true }).click();
   await page.getByRole("button", { name: "Pricing", exact: true }).click();
-  await page.getByRole("combobox", { name: "model", exact: true }).selectOption("model-a");
+  await page.getByRole("dialog").locator("#pr-model").selectOption("model-a");
   for (const [key, v] of [["price_in", "1.25"], ["price_out", "10"], ["price_cache_read", "0.125"], ["price_cache_write", "0"]]) {
-    await page.getByRole("textbox", { name: key, exact: true }).fill(v);
+    await page.getByRole("dialog").locator(`#pr-${key}`).fill(v);
   }
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Save rate", exact: true }).click();
   await page.waitForTimeout(800);
   check("PUT sends model, not model_id", payload?.model === "model-a" && !("model_id" in (payload ?? {})), payload);
   check("no error shown", (await page.getByText("unknown field", { exact: false }).count()) === 0);

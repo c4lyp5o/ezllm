@@ -21,6 +21,7 @@ try {
     export { startProgress, defaultTestModel, freeNamespace, isAppKey, START_PRESETS } from ${JSON.stringify(join(src, 'utils/start.ts'))};
     export { PROVIDER_PRESETS, modelStatus } from ${JSON.stringify(join(src, 'utils/providers.ts'))};
     export { plainReason, apiLabel } from ${JSON.stringify(join(src, 'utils/words.ts'))};
+    export { extraStates, EXTRAS } from ${JSON.stringify(join(src, 'utils/extras.ts'))};
     export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
     export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
     export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
@@ -147,5 +148,21 @@ try {
   assert.equal(m.plainReason(undefined), '');
   assert.equal(m.apiLabel('chat'), 'Chat Completions');
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette, Get started and the plain words hold.');
+  // An extra is in use only when it would change a request or serve one.
+  const none = { profiles: [], combos: [], tokens: [], rules: [], services: [] };
+  assert.deepEqual(m.extraStates(none), { compression: false, rules: false, services: false, chat: null, neighbourhood: null });
+  const on = { id: 1, enabled: true }, off = { id: 2, enabled: false };
+  assert.equal(m.extraStates({ ...none, profiles: [on] }).compression, false, 'a profile no combo or key uses is not in use');
+  assert.equal(m.extraStates({ ...none, profiles: [on], combos: [{ compression_profile_id: 1 }] }).compression, true);
+  assert.equal(m.extraStates({ ...none, profiles: [on], tokens: [{ compression_profile_id: 1 }] }).compression, true);
+  assert.equal(m.extraStates({ ...none, profiles: [off], combos: [{ compression_profile_id: 2 }] }).compression, false, 'a profile that is off is not in use');
+  assert.equal(m.extraStates({ ...none, profiles: null }).compression, null, 'unknown when it did not load');
+  assert.equal(m.extraStates({ ...none, rules: [{ enabled: false }] }).rules, false);
+  assert.equal(m.extraStates({ ...none, rules: [{ enabled: true }] }).rules, true);
+  assert.equal(m.extraStates({ ...none, services: [{ mode: 'auto', resolved_target: '' }] }).services, false);
+  assert.equal(m.extraStates({ ...none, services: [{ mode: 'auto', resolved_target: 'acme/embed' }] }).services, true);
+  assert.equal(m.extraStates({ ...none, services: [{ mode: 'off', resolved_target: 'acme/embed' }] }).services, false);
+  assert.deepEqual(m.EXTRAS.map((x) => x.key), ['compression', 'rules', 'services', 'chat', 'neighbourhood']);
+
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette, Get started, the plain words and the extras hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

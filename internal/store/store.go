@@ -61,6 +61,9 @@ type DB struct {
 	callCh             chan ledgerItem
 	reservationCleanup chan int64
 	closeCh            chan struct{}
+	// profileCount caches how many compression profiles exist (-1 = not read
+	// yet), so a request on an instance without any skips the lookups.
+	profileCount atomic.Int64
 	// recMu orders RecordCall against Close: a row enqueued under RLock is
 	// in callCh before closeCh closes (so the final drain sees it), and a row
 	// arriving after Close sees closed and is counted as dropped.
@@ -133,6 +136,7 @@ func Open(ctx context.Context, opts Options) (*DB, error) {
 
 		closeCh: make(chan struct{}),
 	}
+	db.profileCount.Store(-1)
 	if strings.TrimSpace(opts.MasterSecret) != "" {
 		fc, err := NewFieldCrypto(opts.MasterSecret)
 		if err != nil {

@@ -2,7 +2,7 @@ import { subscribePreferences } from './utils/preferences';
 import type { UpdateStatus } from './utils/api';
 // App shell: token unlock gate → sidebar layout → routes.
 // Nothing renders or fetches before the unlock screen hands back a token.
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { Brand } from './ez/Brand';
@@ -18,6 +18,7 @@ import { CopyButton, Spinner, btn, cx } from './components/ui';
 import ThemeToggle from './components/ThemeToggle';
 import { CommandPalette, OPEN_PALETTE } from './components/CommandPalette';
 import { PageBoundary, PageLoading } from './components/PageBoundary';
+import { useExtras, type ExtraKey } from './utils/extras';
 
 // Pages load on demand: the unlock screen downloads none of them (nor the
 // chart library most of them pull in), and each page's code arrives the first
@@ -41,22 +42,24 @@ const Start = lazy(() => import('./pages/Start'));
 // together under Analytics (same data family, tabbed).
 // A labelled sidebar, not the dealt icon rail: ten destinations need words.
 // The hints are kept as each item's tooltip, not as a second line of text.
-type NavItem = { to: string; label: string; hint: string; match?: readonly string[] };
+type NavItem = { to: string; label: string; hint: string; match?: readonly string[]; extra?: ExtraKey; group: 'core' | 'more' | 'end' };
 
 const ANALYTICS_ROUTES = ['/stats', '/economics', '/requests'] as const;
 
+// Core first (what you need to route a request), then More (what ezllm can
+// also do for you), then Settings.
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
-  { to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
-  { to: '/providers', label: 'Providers', hint: 'keys · models · quota' },
-  { to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
-  { to: '/chat', label: 'Chat', hint: 'test a model' },
-  { to: '/combos', label: 'Combos', hint: 'routing chains' },
-  { to: '/rules', label: 'Rules', hint: 'quotas · windows' },
-  { to: '/compression', label: 'Compression', hint: 'profiles · engines' },
-  { to: '/connect', label: 'Connect', hint: 'routes · app keys' },
-  { to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers drawn as a city' },
-  { to: '/settings', label: 'Settings', hint: 'instance administration' },
+  { group: 'core', to: '/', label: 'Dashboard', hint: 'overview · health · ledger' },
+  { group: 'core', to: '/providers', label: 'Providers', hint: 'keys · models · quota' },
+  { group: 'core', to: '/combos', label: 'Combos', hint: 'routing chains' },
+  { group: 'core', to: '/connect', label: 'Connect', hint: 'address · app keys' },
+  { group: 'core', to: '/stats', label: 'Analytics', hint: 'stats · economics · requests', match: ANALYTICS_ROUTES },
+  { group: 'more', extra: 'compression', to: '/compression', label: 'Compression', hint: 'fewer tokens on long chats' },
+  { group: 'more', extra: 'rules', to: '/rules', label: 'Rules', hint: 'token limits · allowed hours' },
+  { group: 'more', extra: 'services', to: '/services', label: 'Services', hint: 'embeddings · images · audio' },
+  { group: 'more', extra: 'chat', to: '/chat', label: 'Chat', hint: 'try your models' },
+  { group: 'more', extra: 'neighbourhood', to: '/neighbourhood', label: 'Neighbourhood', hint: 'your providers drawn as a city' },
+  { group: 'end', to: '/settings', label: 'Settings', hint: 'instance administration' },
 ];
 
 // One restrained 16px stroke icon per destination. Inline SVG keeps the
@@ -301,6 +304,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const update = useUpdate();
 
   const changeTheme = useCallback((t: Theme) => { setThemeState(t); setTheme(t); }, []);
+  // Read again on each page change, so "in use" follows what you just set up.
+  const extras = useExtras(location.pathname);
 
   return (
     <div className="flex h-full flex-col">
@@ -320,12 +325,18 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <LayoutGroup id={onNavigate ? 'nav-drawer' : 'nav-side'}>
       <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
-        {NAV.map((item) => {
+        {NAV.map((item, i) => {
+          const heading = item.group === 'more' && NAV[i - 1]?.group !== 'more';
+          const gap = item.group === 'end';
+          const inUse = item.extra ? extras?.[item.extra] === true : false;
           const active = item.match
             ? item.match.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
             : item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
-            <NavLink key={item.to} to={item.to} onClick={onNavigate} end={item.to === '/'} title={item.hint}
+            <Fragment key={item.to}>
+            {heading && <div className="px-2.5 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-mute" role="presentation">More</div>}
+            {gap && <div className="pt-4" role="presentation" />}
+            <NavLink to={item.to} onClick={onNavigate} end={item.to === '/'} title={item.hint}
               aria-current={active ? 'page' : undefined}
               className={cx('flex h-[34px] items-center gap-2.5 rounded px-2.5 transition-colors',
                 active ? 'text-ink' : 'text-mute hover:bg-hover hover:text-ink')}>
@@ -337,7 +348,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 {item.label}
                 {active && <SelectionLine layoutId="nav-line" />}
               </span>
+              {inUse && <span className="ml-auto text-[11px] text-mute">in use</span>}
             </NavLink>
+            </Fragment>
           );
         })}
       </nav>

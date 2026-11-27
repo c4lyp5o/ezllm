@@ -166,9 +166,23 @@ try {
   }
 
   // deep links
+  // A deep link opens the editor from a fetch, not a click: watch every DOM
+  // change so Save is never enabled, not even for the first frame before the
+  // rule's values load.
+  await page.addInitScript(() => {
+    window.__saveEverEnabled = false;
+    const look = () => {
+      for (const b of document.querySelectorAll('[role="dialog"] button[type="submit"]')) {
+        if (b.textContent.trim() === 'Save rule' && !b.disabled) window.__saveEverEnabled = true;
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true }));
+  });
   await page.goto(`${t.base}/rules?edit=31`);
   await dialog().getByText('Edit rule').waitFor();
   check('?edit= opens that rule', (await dialog().locator('#rl-model-x').isChecked()));
+  await page.waitForTimeout(300);
+  check('?edit= opens with Save disabled from the first frame', !(await page.evaluate(() => window.__saveEverEnabled)));
   await page.keyboard.press('Escape');
   await page.goto(`${t.base}/rules?new=1&account=2`);
   await dialog().getByText('New rule').waitFor();

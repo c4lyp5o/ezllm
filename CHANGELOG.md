@@ -6,9 +6,10 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 - **Smoother page changes.** Switching pages mounted the new page twice, so it loaded
   its data twice and could drop what you had just done. It now mounts once and rises in.
-- **Dialogs open with their values.** A key's **Policy** dialog and a compression
-  profile opened from a link showed one frame of empty fields first, so **Save** was
-  briefly on and Escape could ask to discard edits nobody made.
+- **Dialogs open with their values.** A key's **Policy** dialog and the combo, rule and
+  compression-profile editors showed one frame of empty fields first, so **Save** was
+  briefly on, a copy briefly had no name, and Escape could ask to discard edits nobody
+  made.
 - **Chat** keeps following a stream when the column gets shorter, instead of drifting
   off the bottom and offering **Jump to latest**.
 - **Dashboard tests**: the four page tests left out of CI run again.

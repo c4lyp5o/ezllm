@@ -1,7 +1,7 @@
 // COMBOS — routing chains. Cards say whether a chain can serve, how it is doing
 // and which hop is next; the editor guards unsaved work, refuses bad drafts
 // with a reason, and previews what the chosen strategy will do.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ApiError, RANGE_LABEL, accountModels, del, get, patch, post, STRATEGY_HINTS, usage,
@@ -388,7 +388,9 @@ function ComboModal({ target, accounts, profiles, combos, catalogs, ensure, onCl
   const [showAll, setShowAll] = useState(false);
   const [preset, setPreset] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Load the draft before the first paint: with a plain effect the dialog
+  // showed one frame of an empty draft (a copy with no name, Save enabled).
+  useLayoutEffect(() => {
     if (!open) return;
     setErr(null); setBusy(false); setShowAll(false); setPreset(null);
     const next = editing ? draftFrom(editing) : template ? draftFrom(template, copyName(template.name, combos.map((c) => c.name))) : newDraft();

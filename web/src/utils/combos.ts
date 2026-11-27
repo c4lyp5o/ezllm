@@ -74,7 +74,7 @@ export function validateDraft(d: DraftShape, others: string[]): DraftErrors {
   if (d.strategy === 'block_round_robin' && (!Number.isInteger(d.block_size) || d.block_size < 1 || d.block_size > 1000)) e.block = 'A whole number, 1 to 1,000.';
   if (d.strategy === 'sticky_last_good' && (!Number.isInteger(d.sticky_idle_s) || d.sticky_idle_s < 0)) e.idle = 'Zero or more whole seconds.';
   if (!d.auto_free) {
-    if (d.hops.length === 0) e.hops = 'Add at least one hop.';
+    if (d.hops.length === 0) e.hops = 'Add at least one model.';
     const seen = new Map<string, number>();
     d.hops.forEach((h, i) => {
       if (h.account_id <= 0) e.hop[i] = 'Pick a provider.';
@@ -82,7 +82,7 @@ export function validateDraft(d: DraftShape, others: string[]): DraftErrors {
       else {
         const k = `${h.account_id}/${h.model_id.trim()}`;
         const first = seen.get(k);
-        if (first !== undefined) e.hop[i] = `Same provider and model as hop ${first + 1}.`;
+        if (first !== undefined) e.hop[i] = `Same as model ${first + 1}.`;
         else seen.set(k, i);
       }
     });
@@ -102,7 +102,7 @@ export function describePlan(strategy: string, hops: PlanHop[], o: { blockSize: 
   const out: string[] = [];
   if (hops.length === 0) return ['Nothing to route to yet.'];
   if (live.length === 0) {
-    return ['None of the hops can take requests right now, so every request to this combo would fail. Fix the hops marked below or switch one on.'];
+    return ['None of the models can take requests right now, so every request to this combo would fail. Fix the models marked below or switch one on.'];
   }
   const names = live.map((h) => h.label);
   const list = (xs: string[]) => (xs.length <= 2 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
@@ -110,25 +110,25 @@ export function describePlan(strategy: string, hops: PlanHop[], o: { blockSize: 
     case 'failover':
       out.push(`Every request goes to ${names[0]}.`);
       if (names.length > 1) out.push(`If that fails (rate limit, server error, timeout) it moves on to ${list(names.slice(1))}, in that order.`);
-      else out.push('There\'s nothing to fall back to. Add a second hop in case the first one fails.');
+      else out.push('There\'s nothing to fall back to. Add a second model in case the first one fails.');
       break;
     case 'block_round_robin':
       out.push(`${names[0]} serves the next ${o.blockSize} request${o.blockSize === 1 ? '' : 's'}${names.length > 1 ? `, then ${list(names.slice(1))} take the same number in turn, and it loops` : ''}.`);
-      if (live.some((_, i) => o.hold[hops.indexOf(live[i])])) out.push('A hop marked "hold until fail" keeps getting requests for as long as it succeeds.');
-      if (names.length === 1) out.push('With one usable hop there is nothing to rotate between.');
+      if (live.some((_, i) => o.hold[hops.indexOf(live[i])])) out.push('A model marked "hold until it fails" keeps getting requests for as long as it succeeds.');
+      if (names.length === 1) out.push('With one usable model there is nothing to rotate between.');
       break;
     case 'true_round_robin':
-      out.push(`Each request picks one of ${list(names)} at random${names.length > 1 ? `, about 1 in ${names.length} each` : ''}. No hop gets a streak guarantee, and prompt caches go cold.`);
+      out.push(`Each request picks one of ${list(names)} at random${names.length > 1 ? `, about 1 in ${names.length} each` : ''}. No model gets a streak guarantee, and prompt caches go cold.`);
       break;
     case 'sticky_last_good':
-      out.push(`The first request goes to ${names[0]}, and requests stay on whichever hop last worked.`);
-      out.push(o.idleS > 0 ? `After ${o.idleS.toLocaleString('en-US')} second${o.idleS === 1 ? '' : 's'} with no requests the choice resets to ${names[0]}.` : 'With a sticky idle of 0 it never expires on idle.');
+      out.push(`The first request goes to ${names[0]}, and requests stay on whichever model last worked.`);
+      out.push(o.idleS > 0 ? `After ${o.idleS.toLocaleString('en-US')} second${o.idleS === 1 ? '' : 's'} with no requests the choice resets to ${names[0]}.` : 'With a reset time of 0 it never resets on idle.');
       break;
     case 'least_used':
       out.push(`Each request goes to whichever of ${list(names)} has had the least recent traffic.`);
       break;
     default:
-      out.push('This strategy has no description here.');
+      out.push('This order has no description here.');
   }
   const skipped = hops.filter((h) => !h.usable);
   for (const h of skipped) out.push(`${h.label} is skipped: ${h.why}.`);

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { post } from '../utils/api';
 import { listTokens, type TokenInfo } from '../utils/tokens';
 import { parkedFor, secondsLeft } from '../utils/cooldowns';
+import { apiLabel, plainReason } from '../utils/words';
 import { Chip, Modal, Segmented, Spinner, btn, cx, inputCls, labelCls } from './ui';
 
 export type ExplainHop = {
@@ -98,9 +99,9 @@ export function RouteExplainModal({ model, onClose }: { model: string; onClose: 
               {blocked
                 ? <span className="text-bad">{blocked}</span>
                 : res.usable > 0
-                  ? <span className="text-ok">{res.usable === 1 ? '1 hop would be tried.' : `${res.usable} hops would be tried.`}</span>
-                  : <span className="text-bad">No hop can serve this request{res.error ? `: ${res.error}` : '.'}</span>}
-              {res.order_note && <span className="ml-1 text-mute">{res.order_note}.</span>}
+                  ? <span className="text-ok">{res.usable === 1 ? '1 model would be tried.' : `${res.usable} models would be tried.`}</span>
+                  : <span className="text-bad">No model can serve this request{res.error ? `: ${plainReason(res.error)}` : '.'}</span>}
+              {res.order_note && <span className="ml-1 text-mute">{plainReason(res.order_note)}.</span>}
             </p>
             <ol className="divide-y divide-line rounded-lg border border-line">
               {res.hops.map((h, i) => (
@@ -108,13 +109,13 @@ export function RouteExplainModal({ model, onClose }: { model: string; onClose: 
                   <span className="w-5 text-right font-mono text-mute">{i + 1}</span>
                   <span className="font-mono">{h.namespace}<span className="text-mute">/</span>{h.model}</span>
                   <Chip tone={TONE[h.status]}>{WORD[h.status]}</Chip>
-                  {h.wire && <span className="text-[12px] text-mute">{h.translated ? `translated to ${h.wire}` : `native ${h.wire}`}</span>}
-                  {h.parked_until && <span className="text-[12px] text-warn">parked · {parkedFor(secondsLeft({ until: h.parked_until }))}</span>}
+                  {h.wire && h.translated && <span className="text-[12px] text-mute">converted to {apiLabel(h.wire)}</span>}
+                  {h.parked_until && <span className="text-[12px] text-warn">paused · {parkedFor(secondsLeft({ until: h.parked_until }))}</span>}
                   {h.reasoning_allowed && h.reasoning_allowed.length > 0 && <span className="text-[12px] text-mute" title="what this model accepts for reasoning_effort">reasoning: {h.reasoning_allowed.join(', ')}</span>}
-                  {h.reason && h.status !== 'candidate' && <span className="basis-full pl-8 text-[12px] text-dim">{h.reason}</span>}
+                  {h.reason && h.status !== 'candidate' && <span className="basis-full pl-8 text-[12px] text-dim">{plainReason(h.reason)}</span>}
                 </li>
               ))}
-              {res.hops.length === 0 && <li className="px-3 py-2 text-[13px] text-mute">No hops.</li>}
+              {res.hops.length === 0 && <li className="px-3 py-2 text-[13px] text-mute">No models.</li>}
             </ol>
           </div>
         )}

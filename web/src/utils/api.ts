@@ -1142,11 +1142,11 @@ export const STEPS = ['format', 'catalog', 'auth', 'quota', 'inference', 'protoc
 export const KINDS = ['opencode-go', 'openai-compatible', 'anthropic-compatible', 'gemini-openai'] as const;
 
 export const STRATEGY_HINTS: Record<string, string> = {
-  failover: 'try each hop in order until one works',
-  block_round_robin: 'send N requests to one hop, then move to the next. This keeps each account\'s prompt cache in use. N can\'t be more than the hop\'s request limit.',
-  true_round_robin: 'pick a hop at random for each request. It evens out over time, but the prompt cache isn\'t reused and the same hop can come up several times in a row.',
-  sticky_last_good: 'stay on the last hop that worked, and start over after sticky_idle_s seconds with no requests',
-  least_used: 'send each request to the hop with the least recent traffic',
+  failover: 'try each model in order until one works',
+  block_round_robin: 'send N requests to one model, then move to the next. This keeps each provider\'s prompt cache in use. N can\'t be more than the provider\'s request limit.',
+  true_round_robin: 'pick a model at random for each request. It evens out over time, but the prompt cache isn\'t reused and the same model can come up several times in a row.',
+  sticky_last_good: 'stay on the last model that worked, and start over after a set time with no requests',
+  least_used: 'send each request to the model with the least recent traffic',
 };
 
 // ── notifications (the bell) ──

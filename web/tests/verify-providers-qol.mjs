@@ -51,7 +51,7 @@ try {
   const save = dialog().getByRole('button', { name: 'Save', exact: true });
   check('edit: Save is disabled until something changes', await save.isDisabled());
   check('edit: first field is focused, not the close button', (await page.evaluate(() => document.activeElement?.id)) === 'ea-name');
-  check('edit: namespace is read-only', await dialog().getByLabel('Namespace', { exact: true }).isDisabled());
+  check('edit: provider ID is read-only', await dialog().getByLabel('Provider ID', { exact: true }).isDisabled());
   await dialog().getByLabel('Name', { exact: true }).fill('Beta renamed');
   check('edit: Save enables once dirty', await save.isEnabled());
   await page.keyboard.press('Escape');
@@ -79,7 +79,7 @@ try {
   check('keys: a failed key says so', (await dialog().getByText('last test failed').count()) === 1);
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Replace key backup' }).click();
-  const secret = dialog().getByLabel('API key');
+  const secret = dialog().getByLabel('Provider key');
   check('keys: replace form is masked', (await secret.getAttribute('type')) === 'password');
   await dialog().getByRole('button', { name: 'Show value' }).click();
   check('keys: Show reveals the value field', (await secret.getAttribute('type')) === 'text');
@@ -107,7 +107,7 @@ try {
   keyPost = { status: 422, delay: 0 };
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Replace key primary' }).click();
-  await dialog().getByLabel('API key').fill('bad-key');
+  await dialog().getByLabel('Provider key').fill('bad-key');
   await dialog().getByRole('button', { name: 'Validate, save & remove old key' }).click();
   await dialog().getByText('the key was rejected').waitFor();
   check('replace: a rejected key shows the reason', true);
@@ -118,8 +118,8 @@ try {
   calls.length = 0;
   await dialog().getByRole('button', { name: 'Cancel', exact: true }).click();
   await dialog().getByRole('button', { name: 'Add key' }).click();
-  await dialog().getByLabel('API key').fill('sk-added');
-  await dialog().getByLabel('API key').press('Enter');
+  await dialog().getByLabel('Provider key').fill('sk-added');
+  await dialog().getByLabel('Provider key').press('Enter');
   await dialog().getByText(/Key added/).waitFor({ timeout: 5000 });
   check('add: Enter in the key field validates it, without saving settings', last(/^POST .*keys /).length === 1 && last(/^PATCH/).length === 0, calls);
   await page.keyboard.press('Escape');

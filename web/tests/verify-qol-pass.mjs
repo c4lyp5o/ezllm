@@ -61,44 +61,44 @@ const page = await t.page(async (route, url) => {
 });
 try {
   await page.goto(`${t.base}/providers`);
-  const pill = page.getByText(/parked · 1m \d+s/).first();
+  const pill = page.getByText(/paused · 1m \d+s/).first();
   await pill.waitFor();
   check('provider card shows the park with a countdown', await pill.count() === 1);
   if (shots) { await page.waitForTimeout(1200); await page.screenshot({ path: `${shots}/providers-parked.png`, clip: { x: 240, y: 170, width: 1200, height: 130 } }); }
-  await page.getByRole('button', { name: 'Unpark' }).first().click();
+  await page.getByRole('button', { name: 'Resume' }).first().click();
   await page.waitForTimeout(300);
-  check('Unpark clears the account', deletes.at(-1) === '?namespace=mock', deletes);
-  check('the pill goes away once nothing is parked', await page.getByText(/parked · /).count() === 0);
+  check('Resume clears the provider', deletes.at(-1) === '?namespace=mock', deletes);
+  check('the pill goes away once nothing is paused', await page.getByText(/paused · /).count() === 0);
 
   // Two keys: one parked key is a key resting, not a parked provider.
   accounts = [{ ...account, keys: [...account.keys, { id: 2, label: 'spare', hint: 'dummy2', enabled: true, last_test_ok: true }] }];
   const keyPark = (key_id) => ({ namespace: 'mock', model: 'model-a', key_id, key_hint: `k${key_id}`, until, strikes: 0, probe_active: false, reason: '429 rate limited' });
   parks = [keyPark(1)];
   await page.reload();
-  await page.getByText(/1 of 2 keys parked · 1m/).first().waitFor();
-  check('one of two keys parked reads as a resting key', await page.getByText(/^parked · /).count() === 0);
+  await page.getByText(/1 of 2 keys paused · 1m/).first().waitFor();
+  check('one of two keys paused reads as a resting key', await page.getByText(/^paused · /).count() === 0);
   if (shots) { await page.waitForTimeout(1200); await page.screenshot({ path: `${shots}/providers-key-parked.png`, clip: { x: 240, y: 170, width: 1200, height: 130 } }); }
   parks = [keyPark(1), keyPark(2)];
   await page.reload();
-  await page.getByText(/parked · 1m/).first().waitFor();
-  check('every key parked reads as parked', await page.getByText(/keys parked/).count() === 0);
-  await page.getByRole('button', { name: 'Unpark' }).first().click();
+  await page.getByText(/paused · 1m/).first().waitFor();
+  check('every key paused reads as paused', await page.getByText(/keys paused/).count() === 0);
+  await page.getByRole('button', { name: 'Resume' }).first().click();
   await page.waitForTimeout(300);
-  check('Unpark clears every key', parks.length === 0, parks);
+  check('Resume clears every key', parks.length === 0, parks);
   accounts = [account];
 
   parks = [{ namespace: 'mock', model: 'model-a', until, strikes: 0, probe_active: false, reason: '5xx' }];
   await page.goto(`${t.base}/combos`);
-  await page.getByText(/parked · 1m/).first().waitFor();
-  check('only the parked hop carries a pill', await page.getByText(/parked · /).count() === 1);
+  await page.getByText(/paused · 1m/).first().waitFor();
+  check('only the paused model carries a pill', await page.getByText(/paused · /).count() === 1);
   if (shots) await page.screenshot({ path: `${shots}/combos-parked.png`, fullPage: false });
-  await page.getByRole('button', { name: 'Unpark' }).first().click();
+  await page.getByRole('button', { name: 'Resume' }).first().click();
   await page.waitForTimeout(300);
-  check('Unpark on a hop clears just that model', deletes.at(-1) === '?namespace=mock&model=model-a', deletes);
+  check('Resume on a model clears just that model', deletes.at(-1) === '?namespace=mock&model=model-a', deletes);
 
   await page.getByRole('button', { name: 'Explain' }).click();
-  await page.getByText('1 hop would be tried.').waitFor();
-  check('explain lists both hops with their verdicts', await page.getByText('would be tried', { exact: true }).count() === 1 && await page.getByText('parked: 429 rate limited').count() === 1);
+  await page.getByText('1 model would be tried.').waitFor();
+  check('explain lists both models, the skip reason in plain words', await page.getByText('would be tried', { exact: true }).count() === 1 && await page.getByText('paused: 429 rate limited').count() === 1);
   check('explain asked about the combo on the chat API', explains.at(-1)?.model === 'daily' && explains.at(-1)?.surface === 'chat', explains);
   if (shots) { await page.waitForTimeout(1000); await page.screenshot({ path: `${shots}/combos-explain.png`, fullPage: false }); }
   await page.getByRole('button', { name: 'Anthropic' }).click();

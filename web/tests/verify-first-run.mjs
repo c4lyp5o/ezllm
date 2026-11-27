@@ -93,12 +93,12 @@ try {
 
   // A refused key leaves nothing behind.
   await page.getByRole('radio', { name: /OpenAI$/ }).click();
-  await page.getByLabel('API key').fill('bad-key');
+  await page.getByLabel('Provider key').fill('bad-key');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.getByText('the provider refused this key (401)').waitFor();
   check('a refused key removes the account again', removed.length === 1 && accounts.length === 0, { removed, accounts: accounts.length });
 
-  await page.getByLabel('API key').fill('sk-real-key');
+  await page.getByLabel('Provider key').fill('sk-real-key');
   check('a new key clears the old error', await page.getByText('the provider refused this key (401)').count() === 0);
   if (shots) await page.screenshot({ path: `${shots}/first-run-2-provider.png` });
   await page.getByRole('button', { name: 'Connect' }).click();

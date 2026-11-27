@@ -21,17 +21,17 @@ your app's API, untranslated. A request is translated when:
   | `chat` | `responses`, then `anthropic` |
   | `responses` | `chat`, then `anthropic` |
 
-- **The model is pinned** to another API ([pins](#pins)).
+- **The model is forced** to another API ([force an API](#force-an-api)).
 - **The model is on the `responses_models` list** ([below](#models-that-need-responses)).
 
-This works for combos and for a direct `provider/model` ID. In a combo, a translated hop is
-an ordinary hop: same place in the order, same retries.
+This works for combos and for a direct `provider/model` ID. In a combo, a translated model is
+an ordinary model: same place in the order, same retries.
 
 ## Test a model
 
-ezllm learns what a model speaks by testing it. In **Providers**, open an account's models
-and choose **Test all models**. The tests send small real requests, which your provider may
-bill. The **Protocols** column then shows what each model can serve.
+ezllm learns what a model speaks by testing it. In **Providers**, open a provider's models,
+turn on **Advanced** and choose **Test all models**. The tests send small real requests,
+which your provider may bill. The **APIs** column then shows what each model can serve.
 
 A `429`, a server error or a timeout during a test teaches nothing, so the old result
 stays.
@@ -50,28 +50,29 @@ to hand it back to the tests.
 
 ## What changes when a request is translated
 
-- **Requests** marks the row `⇄ translated`. It keeps your app's API and the model that
+- **Requests** marks the row `⇄ converted`. It keeps your app's API and the model that
   answered.
 - On translated rows, `tokens_in` includes cached tokens and `tokens_cached_read` is `0`.
   Rules that cap input tokens count them a little early.
 - A feature that would change the answer in translation, such as an unsupported content
   type, is refused before anything is sent. It costs nothing, and a combo moves to its
-  next hop.
+  next model.
 - Anthropic `thinking` blocks are dropped. ezllm adds no `cache_control`; the provider's
   own prefix caching still works.
 - A translated stream that stops early still shows `200`, as your app saw it. The row
   records `translated stream failed` or `translated stream truncated`.
 
-## Pins
+## Force an API
 
-A pin ties a model to one API, set in **Providers**. With translation on, a request on
-another of the three APIs is translated to the pinned one.
+You can tie a model to one API. In **Providers**, open a provider's models, turn on
+**Advanced** and pick the API under **Force API**. With translation on, a request on
+another of the three APIs is translated to that one. The API calls this a pin.
 
 | Case | Answer |
 |---|---|
-| Pinned to an API a test showed it cannot serve | `400 wire_unsupported` |
-| Pinned to a service (`embeddings`, …) and called on a chat API, or the other way | `400 pinned_surface` |
-| Translation off, and the request's API is not the pinned one | `400 pinned_surface` |
+| Forced to an API a test showed it cannot serve | `400 wire_unsupported` |
+| Forced to a service (`embeddings`, …) and called on a chat API, or the other way | `400 pinned_surface` |
+| Translation off, and the request's API is not the forced one | `400 pinned_surface` |
 
 ## Models that need Responses
 
@@ -105,7 +106,7 @@ curl -s -X PATCH -H "Authorization: Bearer YOUR_ADMIN_KEY" -H 'Content-Type: app
 
 ## Turn it off
 
-In **Settings** → **Gateway**, switch off **Protocol translation**. It applies to new
+In **Settings** → **Gateway**, switch off **API conversion**. It applies to new
 requests at once. To fix it from the host, set `EZLLM_TRANSLATION_ENABLED=false` and
 restart.
 

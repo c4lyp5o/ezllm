@@ -25,6 +25,44 @@ export function SectionLabel({ children, className }: { children: ReactNode; cla
   );
 }
 
+/** Where an Advanced fold keeps its open state between visits. */
+export const ADVANCED_KEY = (id: string) => `ezllm.advanced.${id}`;
+
+/**
+ * The one fold for settings most people never need. Closed by default; with
+ * an `id` it remembers being opened, per section, in this browser.
+ */
+export function Advanced({ id, label = 'Advanced', hint, children, className, forceOpen }: {
+  id?: string; label?: string; hint?: string; children: ReactNode; className?: string;
+  /** Open regardless of the saved state, e.g. while a field inside needs fixing. */
+  forceOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(() => {
+    if (!id) return false;
+    try { return localStorage.getItem(ADVANCED_KEY(id)) === '1'; } catch { return false; }
+  });
+  const shown = open || forceOpen === true;
+  return (
+    <details open={shown} data-advanced={id ?? ''}
+      className={cx('rounded-lg border border-line bg-raised/40 px-4 py-3', className)}
+      onToggle={(e) => {
+        const el = e.currentTarget as HTMLDetailsElement;
+        // A field inside needs fixing: the fold stays open. React won't put
+        // the attribute back (its prop didn't change), so do it here.
+        if (forceOpen && !el.open) { el.open = true; return; }
+        const next = el.open;
+        setOpen(next);
+        if (id) { try { localStorage.setItem(ADVANCED_KEY(id), next ? '1' : '0'); } catch { /* private mode */ } }
+      }}>
+      <summary className="cursor-pointer select-none text-[13px] font-medium text-dim marker:text-mute">
+        {label}
+        {hint && <span className="ml-2 text-[12px] font-normal text-mute">{hint}</span>}
+      </summary>
+      {shown && <div className="mt-4 space-y-4">{children}</div>}
+    </details>
+  );
+}
+
 export function Mono({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={cx('font-mono text-[13px]', className)}>{children}</span>;
 }

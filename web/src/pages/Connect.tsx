@@ -162,7 +162,7 @@ function RoleField({ value, onChange, error }: { value: Role[]; onChange: (r: Ro
       {error && <p className="mt-1.5 text-[12px] text-bad" role="alert">{error}</p>}
       {value.includes('admin') && (
         <p className="mt-2 rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
-          An admin key can add providers, read their keys and create new API keys. Keep it for yourself and don't give it to a tool.
+          An admin key can add providers, read their keys and create new app keys. Keep it for yourself and don't give it to a tool.
         </p>
       )}
     </fieldset>
@@ -206,7 +206,7 @@ function CreateKeyModal({ open, names, ids, onClose, onCreated }: {
 
   return (
     <Modal open={open} onClose={onClose} wide busy={busy} dirty={dirty} onSubmit={() => void submit()}
-      title="Create an API key" subtitle="You'll see the key once, right after you create it"
+      title="Create an app key" subtitle="You'll see the key once, right after you create it"
       footer={(close) => <>
         {showAll && hasKeyErrors(errors) && <span className="mr-auto text-[12px] text-bad">Fix the fields marked in red to create the key.</span>}
         <button type="button" className={cx(btn.base, btn.ghost)} onClick={close}>Cancel</button>
@@ -273,7 +273,7 @@ function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; 
       {/* The panel SCALES in slightly rather than fading: a one-time secret is
           the one moment in this app where the operator's attention should be
           pulled to the middle of the screen. */}
-      <motion.div role="dialog" aria-modal="true" aria-label="New API key"
+      <motion.div role="dialog" aria-modal="true" aria-label="New app key"
         initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
         className="my-auto w-full max-w-lg rounded-2xl border border-accent/40 bg-surface p-6 shadow-2xl">
         <div className="text-[16px] font-semibold">Copy this key now</div>
@@ -291,7 +291,7 @@ function FreshKey({ fresh, base, sample, note, onDone }: { fresh: TokenCreated; 
           <FieldRow label="Roles" value={fresh.roles.join(' · ')} mono={false} />
           {fresh.roles.includes('admin') && (
             <p className="rounded-lg border border-warn/30 bg-warn-dim p-2.5 text-[13px] leading-relaxed text-warn">
-              This is an admin key. It can add providers, read their keys and create other API keys. If an app only
+              This is an admin key. It can add providers, read their keys and create other app keys. If an app only
               needs models, give it an <span className="text-ink">Inference</span> key instead.
             </p>
           )}

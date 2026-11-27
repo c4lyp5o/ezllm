@@ -19,7 +19,8 @@ try {
     export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
     export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
     export { startProgress, defaultTestModel, freeNamespace, isAppKey, START_PRESETS } from ${JSON.stringify(join(src, 'utils/start.ts'))};
-    export { PROVIDER_PRESETS } from ${JSON.stringify(join(src, 'utils/providers.ts'))};
+    export { PROVIDER_PRESETS, modelStatus } from ${JSON.stringify(join(src, 'utils/providers.ts'))};
+    export { plainReason, apiLabel } from ${JSON.stringify(join(src, 'utils/words.ts'))};
     export { parkedFor, secondsLeft, splitParks } from ${JSON.stringify(join(src, 'utils/cooldowns.ts'))};
     export { csvField, toCSV } from ${JSON.stringify(join(src, 'utils/export.ts'))};
     export { filterPalette, PALETTE_ITEMS } from ${JSON.stringify(join(src, 'components/CommandPalette.tsx'))};
@@ -125,8 +126,26 @@ try {
 
   // Palette: every word must match, in label or hint.
   assert.deepEqual(m.filterPalette(m.PALETTE_ITEMS, 'new combo').map((i) => i.to), ['/combos?new=1']);
-  assert.ok(m.filterPalette(m.PALETTE_ITEMS, 'cooldowns').some((i) => i.to === '/settings?tab=gateway'));
+  assert.ok(m.filterPalette(m.PALETTE_ITEMS, 'pauses').some((i) => i.to === '/settings?tab=gateway'));
   assert.equal(m.filterPalette(m.PALETTE_ITEMS, '').length, m.PALETTE_ITEMS.length);
 
-  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette and Get started hold.');
+  // One status per model: works if any API passed, untested if none ran.
+  assert.equal(m.modelStatus({ chat: true, anthropic: false, responses: null }), 'works');
+  assert.equal(m.modelStatus({ chat: null, anthropic: null, responses: null }), 'untested');
+  assert.equal(m.modelStatus({}), 'untested');
+  assert.equal(m.modelStatus({ chat: false, anthropic: 404, responses: null }), 'fails');
+
+  // Router messages read in the dashboard's words; ids and numbers stay.
+  assert.equal(m.plainReason('hop acme/gpt-x: not in that account\'s catalog'), "acme/gpt-x: not in that provider's catalog");
+  assert.equal(m.plainReason('probed unable to serve the anthropic surface and not proven on another wire'),
+    "tested: doesn't work on Anthropic Messages, and no other API is proven");
+  assert.equal(m.plainReason('model is pinned to a wire the probe disproved'), "forced to an API that testing showed doesn't work");
+  assert.equal(m.plainReason('router: combo "daily" has no usable hops'), 'combo "daily" has no usable models');
+  assert.equal(m.plainReason('"acme/m1" cannot serve the responses wire'), '"acme/m1" doesn\'t work on Responses');
+  assert.equal(m.plainReason('openrouter/meta/llama:free is parked'), 'openrouter/meta/llama:free is paused');
+  assert.equal(m.plainReason('shopping hopper'), 'shopping hopper');
+  assert.equal(m.plainReason(undefined), '');
+  assert.equal(m.apiLabel('chat'), 'Chat Completions');
+
+  console.log('Dashboard logic: links, globs, key state, buildings, attachments, settings text, countdowns, CSV, the palette, Get started and the plain words hold.');
 } finally { await rm(dir, { recursive: true, force: true }); }

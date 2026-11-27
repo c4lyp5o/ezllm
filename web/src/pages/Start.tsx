@@ -85,8 +85,8 @@ function AddProvider({ taken, onDone }: { taken: string[]; onDone: (a: Account, 
             </div>
           )}
           <div>
-            <label className={labelCls} htmlFor="start-key">API key</label>
-            <SecretInput id="start-key" value={apiKey} onChange={(v) => { setApiKey(v); setErr(''); }} disabled={busy} placeholder="Paste the provider's API key" onEnter={() => void connect()} />
+            <label className={labelCls} htmlFor="start-key">Provider key</label>
+            <SecretInput id="start-key" value={apiKey} onChange={(v) => { setApiKey(v); setErr(''); }} disabled={busy} placeholder="Paste the key from your provider" onEnter={() => void connect()} />
           </div>
           <div className="flex items-center gap-3">
             <button type="button" className={cx(btn.base, btn.primary)} disabled={!ready || busy} onClick={() => void connect()}>

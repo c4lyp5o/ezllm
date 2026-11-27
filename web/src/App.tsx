@@ -393,7 +393,7 @@ const PAGE_HEADERS: Record<string, { title: string; sub: string }> = {
   '/rules': { title: 'Rules', sub: 'Token caps and allowed-use windows per model.' },
   '/compression': { title: 'Compression', sub: 'Compression profiles and how much they save.' },
   '/connect': { title: 'Connect', sub: 'App keys, and how to point your apps at ezllm.' },
-  '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Busier providers glow brighter.' },
+  '/neighbourhood': { title: 'Neighbourhood', sub: 'Each provider is a building. Taller means busier; red means failing.' },
   '/settings': { title: 'Settings', sub: 'Preferences, security, backups and request limits.' },
   '/start': { title: 'Get started', sub: 'Three steps to your first request.' },
 };

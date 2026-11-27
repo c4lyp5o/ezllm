@@ -14,7 +14,7 @@ try {
   await writeFile(entry, `
     export { safeHref } from ${JSON.stringify(join(src, 'utils/lib.ts'))};
     export { globMatch, keyState } from ${JSON.stringify(join(src, 'utils/connect.ts'))};
-    export { buildBuildings } from ${JSON.stringify(join(src, 'utils/city.ts'))};
+    export { buildBuildings, niceCeil, scaleCeiling, rulerTicks, share, floorsOf, windowMix, planRows, placeSigns, signLine, MAX_FLOORS } from ${JSON.stringify(join(src, 'utils/city.ts'))};
     export { looksBinary, fenceFor } from ${JSON.stringify(join(src, 'utils/chatlog.ts'))};
     export { effectiveText, settingError } from ${JSON.stringify(join(src, 'utils/settings.ts'))};
     export { summarizeImport, importWrites } from ${JSON.stringify(join(src, 'utils/import.ts'))};
@@ -57,6 +57,62 @@ try {
   assert.equal(a.calls, 6, 'acme keeps its own calls');
   assert.equal(b.calls, 0, 'globex is not credited with acme\'s calls through a shared hint');
   assert.equal(b.keys[0].calls, 0, 'a shared hint is not attributed to either key');
+
+  // Neighbourhood: one encoding per question (docs/design/neighbourhood-design.md).
+  {
+    const acc = (id, name, ns, o = {}) => ({ id, name, namespace: ns, kind: 'openai-compatible', enabled: true, keys: [{ id, label: '', hint: `h${id}`, enabled: true }], ...o });
+    const row = (k, tpmTimes5, calls, errors) => ({ k, tin: tpmTimes5, tout: 0, calls, errors });
+    const city = m.buildBuildings([
+      acc(1, 'OpenRouter', 'openrouter'), acc(2, 'Groq', 'groq'), acc(3, 'OpenAI', 'openai'),
+      acc(4, 'Ollama', 'ollama', { enabled: false }), acc(5, 'Idle Co', 'idle'), acc(6, 'Two Fails', 'twofail'),
+    ], { groups: [row('openrouter', 990000, 120, 2), row('groq', 48000, 30, 12), row('openai', 1100, 4, 4), row('twofail', 500, 2, 2)] }, 5);
+    const by = Object.fromEntries(city.map((b) => [b.namespace, b]));
+    assert.equal(by.openrouter.health, 'serving');
+    assert.equal(by.groq.health, 'failing', '40% of 30 calls failed');
+    assert.equal(by.openai.health, 'failing', '100% of 4 calls failed');
+    assert.equal(by.twofail.health, 'serving', 'two calls are too few to call it failing');
+    assert.equal(by.ollama.health, 'off');
+    assert.equal(by.idle.health, 'quiet');
+    assert.equal(m.buildBuildings([acc(1, 'A', 'a')], null)[0].health, 'unknown', 'no usage is unknown, never quiet');
+
+    // Height is linear: 220 tok/min is ~0.1% of 198,000, not 44% as the old log scale drew it.
+    const ceiling = m.scaleCeiling(city);
+    assert.equal(ceiling, 200000, 'busiest 198,000 rounds up to 200k');
+    assert.ok(Math.abs(m.share(by.openai.tpm, ceiling) - 220 / 200000) < 1e-9);
+    assert.equal(m.share(300000, 100000), 1, 'over a fixed ceiling is full height');
+    assert.equal(m.floorsOf(by.openrouter, ceiling), Math.round(198000 / 200000 * m.MAX_FLOORS));
+    assert.equal(m.floorsOf(by.openai, ceiling), 1, 'any traffic is at least one storey');
+    assert.equal(m.floorsOf(by.ollama, ceiling), 1);
+    assert.equal(m.scaleCeiling(city, 100000), 100000, 'a fixed ceiling wins');
+    assert.equal(m.scaleCeiling([]), 1000, 'never below 1,000');
+    assert.deepEqual([1, 1001, 1999, 2001, 2600, 5001, 99999].map(m.niceCeil), [1, 2000, 2000, 2500, 5000, 10000, 100000]);
+    assert.deepEqual(m.rulerTicks(200000), [0, 50000, 100000, 150000, 200000]);
+    assert.deepEqual(m.rulerTicks(250000), [0, 50000, 100000, 150000, 200000, 250000]);
+    assert.deepEqual(m.rulerTicks(5000), [0, 1000, 2000, 3000, 4000, 5000]);
+
+    // Windows: lit share = calls that worked, red share = calls that failed.
+    assert.deepEqual(m.windowMix(by.groq), { ok: 0.6, failed: 0.4 });
+    assert.deepEqual(m.windowMix(by.idle), { ok: 0, failed: 0 }, 'no calls, dark windows');
+    assert.deepEqual(m.windowMix(by.ollama), { ok: 0, failed: 0 });
+
+    // Rows: failing in front, then serving, quiet, switched off; by name within a row.
+    const names = (rows) => rows.map((r) => r.map((b) => b.name));
+    assert.deepEqual(names(m.planRows(city)), [['Groq', 'OpenAI'], ['OpenRouter', 'Two Fails'], ['Idle Co'], ['Ollama']]);
+    assert.deepEqual(names(m.planRows(city, 1)).slice(0, 2), [['Groq'], ['OpenAI']], 'rows wrap at perRow');
+    const busier = city.map((b) => (b.namespace === 'twofail' ? { ...b, tpm: 999999 } : b));
+    assert.deepEqual(names(m.planRows(busier)), names(m.planRows(city)), 'traffic alone never moves a building');
+
+    // Signs: placed front first, later ones nudged up until nothing overlaps.
+    const tops = m.placeSigns([{ id: 'a', x: 0, y: 100, w: 80, h: 30 }, { id: 'b', x: 40, y: 100, w: 80, h: 30 }, { id: 'c', x: 300, y: 100, w: 80, h: 30 }]);
+    assert.equal(tops.get('a'), 100, 'the front sign stays');
+    assert.ok(tops.get('b') <= 100 - 30 - 4, 'an overlapping sign moves clear above');
+    assert.equal(tops.get('c'), 100, 'a sign with room stays');
+
+    const short = (n) => String(n);
+    assert.equal(m.signLine(by.groq, short), '40% failing');
+    assert.equal(m.signLine(by.openrouter, short), '198000 tok/min');
+    assert.equal(m.signLine(by.ollama, short), 'switched off');
+  }
 
   // Chat attachments: binary rejected, fences outgrow the file's own.
   assert.ok(m.looksBinary('%PDF\u0000\u0001'));

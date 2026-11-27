@@ -300,7 +300,7 @@ does nothing to your requests until then.
 | **Rules** | Token limits and allowed hours per model, checked before anything is sent. |
 | **Services** | Embeddings, images, speech and transcription through the same address and keys. |
 | **Chat** | Talk to your models side by side to compare their answers. |
-| **Neighbourhood** | Your providers drawn as a small city, busy ones lit up. |
+| **Neighbourhood** | Your providers drawn as a small city: taller is busier, red is failing, and failing providers stand in front. |
 
 Scheduled encrypted backups are off until you set them up:
 [recovery](docs/recovery-runbook.md).

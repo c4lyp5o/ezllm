@@ -316,198 +316,72 @@ code, pre, kbd, samp, .font-code { font-family: var(--font-code); font-variant-n
   }
 }
 
-/* Neighbourhood is the fenced miniature-scene exception to the flat data UI.
-   One building per provider, streets between them, light for traffic. The
-   scene is the only place in the app that uses gradients and glow, so every
-   colour it needs lives here as a --nb-* token: light = day, dark = night. */
-.nbhd {
-  --nb-night: 0;
-  --nb-sky-top: #aecfe6; --nb-sky-bottom: #f8e2bf;
-  --nb-land: #86a98a; --nb-hill-far: #b3cbc4; --nb-hill-near: #98b894;
-  --nb-ground: #a6c697; --nb-road: #6c777e; --nb-road-line: #f3e9c9;
-  --nb-pavement: #ddd7c3; --nb-shadow: #36444d;
-  --nb-sage: #ebe5ce; --nb-sage-side: #b0b79d;
-  --nb-clay: #e6bba2; --nb-clay-side: #b6866f;
-  --nb-blue: #bdd5e8; --nb-blue-side: #86a3c3;
-  --nb-steel: #d9dfe3; --nb-steel-side: #a0abb6;
-  --nb-roof: #7b7f88; --nb-roof-top: #aeb4bc; --nb-roof-edge: #5d616b;
-  --nb-door: #5f6872;
-  --nb-window-off: #7a9db6; --nb-window-on: #f6b24a; --nb-glow: #ffd27a; --nb-tail: #cf5c50;
-  --nb-smoke: #9b9c9e; --nb-label: #1f2d34; --nb-cloud: #ffffff;
-  --nb-tree: #5c9a60; --nb-tree-dark: #3f7550; --nb-trunk: #7b6b58;
-  --nb-car: #d6735f; --nb-car-1: #5f93bd; --nb-car-2: #f1c84b; --nb-car-3: #6fa585;
-  --nb-car-window: #e4f0ef;
-  --nb-star: transparent; --nb-moon: #f6c85a;
-}
-.dark .nbhd {
-  --nb-night: 1;
-  --nb-sky-top: #090f24; --nb-sky-bottom: #33456a;
-  --nb-land: #1a2b2b; --nb-hill-far: #1d3042; --nb-hill-near: #162a28;
-  --nb-ground: #223b32; --nb-road: #151c28; --nb-road-line: #7e8d9a;
-  --nb-pavement: #44566a; --nb-shadow: #03070f;
-  --nb-sage: #4f6c69; --nb-sage-side: #2d4443;
-  --nb-clay: #7c6062; --nb-clay-side: #4c3b45;
-  --nb-blue: #4a6591; --nb-blue-side: #2e4366;
-  --nb-steel: #5e6c7e; --nb-steel-side: #3a4657;
-  --nb-roof: #323a49; --nb-roof-top: #5b6475; --nb-roof-edge: #7a879b;
-  --nb-door: #1f2736;
-  --nb-window-off: #1c2a40; --nb-window-on: #ffd083; --nb-glow: #ffb95e; --nb-tail: #e2564f;
-  --nb-smoke: #94a6bb; --nb-label: #c0cfdb; --nb-cloud: #7f93a8;
-  --nb-tree: #3a6b57; --nb-tree-dark: #274b40; --nb-trunk: #5b514d;
-  --nb-car: #d8765f; --nb-car-1: #6f9fc7; --nb-car-2: #e8c35a; --nb-car-3: #7fb596;
-  --nb-car-window: #a4c7d8;
-  --nb-star: #d0e0ed; --nb-moon: #f3dfb2;
-}
-
-/* The stage: sky behind, canvas in front, real buttons over the buildings. */
-.nbhd-city {
+/* Neighbourhood (docs/design/neighbourhood-design.md): an isometric city that
+   tells the truth. The scene draws its own night palette on a canvas; the signs
+   are real buttons over it. Colours here are for the chrome around the canvas. */
+.nbhd-scene {
   position: relative;
   isolation: isolate;
-  height: clamp(360px, 50vw, 600px);
+  height: clamp(380px, 52vw, 620px);
   border-radius: 12px;
   border: 1px solid var(--color-line);
   overflow: hidden;
-  background:
-    radial-gradient(ellipse 70% 40% at 50% 64%, color-mix(in srgb, var(--nb-sky-bottom) 80%, transparent), transparent 70%),
-    linear-gradient(180deg, var(--nb-sky-top), var(--nb-sky-bottom) 70%);
+  background: #121a28;
 }
-.nbhd-city::before {
-  content: "";
+.nbhd-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.nbhd-signs { position: absolute; inset: 0; pointer-events: none; }
+.nbhd-sign {
   position: absolute;
-  width: 26px; height: 26px;
-  right: 9%; top: 7%;
-  border-radius: 50%;
-  background: var(--nb-moon);
-  opacity: 0.75;
-  box-shadow: 0 0 40px 14px color-mix(in srgb, var(--nb-moon) 30%, transparent);
-  pointer-events: none;
+  pointer-events: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid #ffffff26;
+  background: #0f1624f0;
+  color: #f2f5f9;
+  font-size: 12px; line-height: 1.2; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
-.nbhd-city::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.7;
-  background-image:
-    radial-gradient(1.4px 1.4px at 12% 16%, var(--nb-star), transparent),
-    radial-gradient(1px 1px at 26% 9%, var(--nb-star), transparent),
-    radial-gradient(1.6px 1.6px at 38% 22%, var(--nb-star), transparent),
-    radial-gradient(1px 1px at 51% 12%, var(--nb-star), transparent),
-    radial-gradient(1.2px 1.2px at 63% 26%, var(--nb-star), transparent),
-    radial-gradient(1px 1px at 74% 10%, var(--nb-star), transparent),
-    radial-gradient(1.4px 1.4px at 85% 20%, var(--nb-star), transparent),
-    radial-gradient(1px 1px at 93% 8%, var(--nb-star), transparent);
-}
-.nbhd-city-canvas { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; display: block; }
-/* Loading: an indeterminate bar over the stage until the first frame is
-   painted, then a short fade. It never takes a click. */
-.nbhd-city-loading {
-  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
-  background: var(--color-surface); pointer-events: none; transition: opacity 280ms ease;
-}
-.nbhd-city-loading[data-fading="true"] { opacity: 0; }
+.nbhd-sign-name { font-weight: 600; font-size: 13px; }
+.nbhd-sign-line { color: #a3afbf; font-size: 12px; }
+.nbhd-sign[data-big="0"] { padding: 3px 7px; }
+.nbhd-sign[data-big="0"] .nbhd-sign-name { font-size: 11px; }
+.nbhd-sign[data-big="0"] .nbhd-sign-line { display: none; }
+.nbhd-sign[data-health="failing"] { background: #3a0f18f2; border-color: #ef4f63; }
+.nbhd-sign[data-health="failing"] .nbhd-sign-line { color: #ff8a99; font-weight: 600; }
+.nbhd-sign[data-health="off"] .nbhd-sign-name, .nbhd-sign[data-health="unknown"] .nbhd-sign-name { color: #a3afbf; }
+.nbhd-sign[aria-pressed="true"], .nbhd-sign:hover { border-color: #7dd3fc; }
+.nbhd-sign:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+.nbhd-scene-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .nbhd-loader { display: flex; width: min(260px, 70%); flex-direction: column; align-items: center; gap: 10px; }
-.nbhd-loader-track { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 999px; background: var(--color-line); }
+.nbhd-loader-track { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 999px; background: #ffffff1f; }
 .nbhd-loader-fill {
   position: absolute; inset: 0 auto 0 0; width: 38%; border-radius: inherit; background: var(--color-accent);
   animation: nbhd-loader-slide 1.15s ease-in-out infinite;
 }
-.nbhd-loader-label { font-size: 13px; color: var(--color-dim); }
+.nbhd-loader-label { font-size: 13px; color: #a3afbf; }
 @keyframes nbhd-loader-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(265%); } }
-/* Paused traffic pauses the city's animations; the loader is not traffic. */
-.nbhd-city[data-still="true"] .nbhd-loader-fill { animation-play-state: running !important; }
-/* Reduced motion: a still, full bar — loading is said by the words. */
 @media (prefers-reduced-motion: reduce) { .nbhd-loader-fill { animation: none; width: 100%; opacity: 0.5; } }
-:root[data-reduce-motion="true"] .nbhd-loader-fill { animation: none; width: 100%; opacity: 0.5; }
-.nbhd-city-hits { position: absolute; inset: 0; z-index: 2; }
-.nbhd-clouds { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.nbhd-clouds span {
-  position: absolute;
-  width: 120px; height: 26px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--nb-cloud) 45%, transparent);
-  filter: blur(6px);
-  opacity: 0.55;
-  animation: nbhd-drift 74s linear infinite;
-}
-.nbhd-clouds span:first-child { top: 12%; left: -140px; }
-.nbhd-clouds span:last-child { top: 26%; left: -140px; width: 84px; height: 18px; animation-duration: 96s; animation-delay: -30s; opacity: 0.4; }
-@keyframes nbhd-drift { from { transform: translateX(0); } to { transform: translateX(calc(100vw + 300px)); } }
-/* Weather is scenery painted over the scene: rain thickens the cloud layer and
-   cools the light. The canvas itself carries the streaks and the wet streets. */
-.nbhd-city[data-weather="rain"] .nbhd-clouds span { opacity: 0.8; filter: blur(9px); }
-.nbhd-city[data-weather="rain"] .nbhd-clouds span:last-child { opacity: 0.66; animation-duration: 46s; }
-.nbhd-city[data-weather="rain"] .nbhd-city-canvas { filter: saturate(0.92) brightness(0.97); }
-.nbhd-hit {
-  position: absolute;
-  padding: 0; margin: 0; border: 0;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.nbhd-hit:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-}
-.nbhd-reroll {
-  position: absolute;
-  right: 12px; bottom: 12px;
-  display: inline-flex; align-items: center; gap: 6px;
-  min-height: 32px; padding: 0 10px;
-  font-size: 11px; font-weight: 500;
-  color: var(--nb-label);
-  background: color-mix(in srgb, var(--nb-sky-bottom) 78%, transparent);
-  border: 1px solid color-mix(in srgb, var(--nb-label) 22%, transparent);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: color 140ms ease, border-color 140ms ease;
-}
-.nbhd-reroll:hover, .nbhd-reroll:focus-visible { color: var(--color-ink); border-color: color-mix(in srgb, var(--nb-label) 45%, transparent); }
-.nbhd-reroll:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-.nbhd-status-light { width: 6px; height: 6px; border-radius: 50%; background: var(--nb-window-on); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nb-window-on) 12%, transparent); }
-.nbhd-live-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--color-mute);
-  transition: background 200ms ease;
-}
+.nbhd-verdict-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--color-ok); flex: none; }
+.nbhd-verdict-dot[data-bad="true"] { background: var(--color-bad); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-bad) 14%, transparent); }
+.nbhd-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-mute); flex: none; }
 .nbhd-live-dot[data-live="true"] { background: var(--color-ok); animation: nbhd-live 2.4s ease-in-out infinite; }
 @keyframes nbhd-live { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .nbhd-live-dot[data-live="true"] { animation: none; } }
 
-/* Legend keys: shape as well as colour, so the code is not colour-only. */
-.nbhd-key { display: inline-block; width: 9px; height: 9px; border-radius: 2px; flex: none; }
-.nbhd-key-lit { background: var(--nb-window-on); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--nb-glow) 55%, transparent); }
-.nbhd-key-flare { background: transparent; border: 1.5px solid var(--nb-glow); border-radius: 50%; }
-.nbhd-key-rain { background: var(--color-bad); width: 6px; border-radius: 1px; transform: rotate(12deg); }
-.nbhd-key-off { background: color-mix(in srgb, var(--nb-label) 35%, transparent); border: 1px dashed color-mix(in srgb, var(--nb-label) 70%, transparent); }
-
-.nbhd-city[data-still="true"] *, .nbhd-city[data-still="true"] *::before, .nbhd-city[data-still="true"] *::after {
-  animation-play-state: paused !important;
-  transition: none !important;
+.nbhd-stage { position: relative; }
+.nbhd-stage:fullscreen { background: #121a28; display: flex; align-items: stretch; }
+.nbhd-stage:fullscreen .nbhd-scene { flex: 1; height: 100dvh; border-radius: 0; border: 0; }
+.nbhd-exit-full {
+  position: absolute; top: 12px; right: 12px; z-index: 3;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid #ffffff33; background: #0f1624e6; color: #f2f5f9; font-size: 13px;
 }
-@media (max-width: 700px) {
-  .nbhd-city { height: clamp(320px, 56vh, 460px); border-radius: 10px; }
-  .nbhd-hit { min-width: 20px; min-height: 20px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .nbhd-city * { animation: none !important; }
-}
+@media (max-width: 700px) { .nbhd-scene { height: clamp(360px, 70vh, 520px); border-radius: 10px; } }
 
 /* The browser preference can reduce motion even when the OS does not. */
 :root[data-reduce-motion="true"] *, :root[data-reduce-motion="true"] *::before, :root[data-reduce-motion="true"] *::after {
  animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
  transition-duration: 0.01ms !important; scroll-behavior: auto !important;
 }
-
-/* Full screen: the scene fills the display (a wall screen), square-cornered. */
-.nbhd-stage:fullscreen { background: var(--color-bg); display: flex; align-items: stretch; }
-.nbhd-stage:fullscreen .nbhd-city { flex: 1; height: 100dvh; border-radius: 0; border: 0; }
-.nbhd-exit-full {
-  position: absolute; top: 14px; left: 14px; z-index: 5;
-  padding: 6px 12px; border-radius: 999px; font-size: 12px;
-  color: var(--color-ink); background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-  border: 1px solid var(--color-line-strong); backdrop-filter: blur(6px);
-}
-.nbhd-stage:fullscreen { position: relative; }

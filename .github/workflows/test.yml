@@ -112,7 +112,7 @@ jobs:
         run: |
           failed=""
           for d in analytics-order chat-stream-errors compression-qol dashboard-qol ledger-health meta-preset \
-            neighbourhood neighbourhood-polish neighbourhood-qol onboarding-poll policy-expiry preset-labels \
+            neighbourhood neighbourhood-qol onboarding-poll policy-expiry preset-labels \
             pricing-save providers-qol push-channels quota-groups railway ranges report-failures rules-partial \
             rules-qol services-qol settings-qol stats theme; do
             echo "::group::verify-$d"

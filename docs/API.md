@@ -38,7 +38,7 @@ Errors are OpenAI-shaped: `{"error":{"type":"...","message":"...","code":422}}`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.2.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
+| GET | `/healthz` | no auth; **liveness + release version** — `{"status":"ok","version":"2.3.0"}` after a DB ping (503 `{"status":"down","version":"…"}` if the ping fails). Version is the only extra field; no counts/paths/uptime. |
 | GET | `/metrics` | Prometheus text exposition. A token with the `metrics` role only; any other token → 403, the dashboard session → 401. Counters come from committed ledger rows, so a request does no metrics work. Names, labels and auth: [metrics.md](metrics.md). |
 | GET | `/v1/models?protocol=` | `openai` (default) / `anthropic` shape; ids are `<namespace>/<model>`, plus one bare id per **enabled** combo |
 | GET | `/v1/models/{model}` | One entry of that list (`/v1/models/acme/gpt-5` or a combo name), in the same shape; Anthropic's shape when the request carries `anthropic-version` or `?protocol=anthropic`. Unknown → `404 model_not_found` |
@@ -222,7 +222,7 @@ token budgets under-count by them. The live feed's `snapshot` event carries the 
 `dropped`, `lost` and `unmetered`.
 ```jsonc
 {
-  "health": { "status":"ok", "version":"2.2.0", "schema_version":39, "accounts":19, "provider_keys":19,
+  "health": { "status":"ok", "version":"2.3.0", "schema_version":39, "accounts":19, "provider_keys":19,
                "models":1551, "combos":12, "ledger_rows":22309, "dropped_rows":0, "lost_rows":0,
                "unmetered_rows":0, "ledger_span":{"oldest":"…","newest":"…"}, "uptime_s":4115,
                "db_path":"/data/ezllm.sqlite", "stream_window_s":86400, "hop_stream_health":[] },
@@ -477,16 +477,16 @@ build was measured on or one the updater recorded in `qualified.json`, else `unq
 [{"id":"claude-sub","label":"Claude Pro/Max","kind":"anthropic-compatible",
   "base_url":"http://127.0.0.1:8790/v1","usage_convention":"anthropic","enabled":true,
   "env":"EZLLM_CLAUDE_BRIDGE","setup":"docs/bridges/claude.md","runbook":"docs/claude-bridge-runbook.md",
-  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/",
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.3.0/",
   "status":{"cli_version":"2.1.306 (Claude Code)","login":"logged-in","status":"ok","subscription":"Subscription: max"}},
  {"id":"chatgpt-sub","label":"ChatGPT Plus/Pro","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8791/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_CODEX_BRIDGE","setup":"docs/bridges/codex.md","runbook":"docs/codex-bridge-runbook.md",
-  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/"},
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.3.0/"},
  {"id":"antigravity-sub","label":"Google Antigravity","kind":"openai-compatible",
   "base_url":"http://127.0.0.1:8792/v1","usage_convention":"auto","enabled":false,
   "env":"EZLLM_AGY_BRIDGE","setup":"docs/bridges/antigravity.md","runbook":"docs/agy-bridge-runbook.md",
-  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.2.0/"}]
+  "docs":"https://github.com/c4lyp5o/ezllm/blob/v2.3.0/"}]
 ```
 Refusal while a bridge is off (`POST …/keys` with `"bridge":"chatgpt-sub"`):
 ```jsonc

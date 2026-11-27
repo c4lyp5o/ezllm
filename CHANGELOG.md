@@ -4,6 +4,18 @@ Notable changes, reverse-chronological. Milestone-tagged (M1–M15), then by rel
 
 ## Unreleased
 
+## v2.3.0 — Get started, the Gemini API, ledger retention, early warnings, a new Neighbourhood
+
+A fresh ezllm now walks you to a working request in three steps, and the dashboard uses
+plain words with advanced settings folded away. Apps written for Google's Gemini API can
+point at ezllm. Old calls can roll up into daily totals. The bell warns before a quota,
+balance or cookie runs out, and says each warning once. The Neighbourhood is redesigned
+to show what is failing at a glance.
+
+**Before you upgrade:** the database moves to schema 39, and an older ezllm refuses to
+open it. Back up first. `EZLLM_AGY_EXPERIMENTAL_TOOLS` is retired and stops the boot:
+remove it. See [docs/upgrading.md](docs/upgrading.md).
+
 - **Smoother page changes.** Switching pages mounted the new page twice, so it loaded
   its data twice and could drop what you had just done. It now mounts once and rises in.
 - **Dialogs open with their values.** A key's **Policy** dialog and the combo, rule and

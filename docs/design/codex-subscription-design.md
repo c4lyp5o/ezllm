@@ -360,6 +360,8 @@ login present; non-loopback bind refused. Failure is fatal, not logged.
 Streaming transport still uses the provider-local implementation; migration
 to `internal/bridgeutil` remains outstanding.
 Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+**2026-11-15:** Codex now streams through `bridgeutil.Stream` (v2.0.0), and so do all
+four bridges.
 See [the shared transport design](shared-bridge-transport-design.md) for scope
 and per-bridge migration acceptance. Historical decisions above remain as recorded.
 

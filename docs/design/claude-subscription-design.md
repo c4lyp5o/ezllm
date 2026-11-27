@@ -335,5 +335,7 @@ is the container rollback. `claude-web` and every existing account are untouched
 Streaming transport now uses `internal/bridgeutil` (v1.8.0); provider protocol,
 accounting and process lifecycle remain local.
 Claude and Antigravity are migrated; Codex and Copilot are the remaining bridges.
+**2026-11-15:** Codex and Copilot moved to `bridgeutil.Stream` in v2.0.0, so all four
+bridges now share it.
 See [the shared transport design](shared-bridge-transport-design.md) for scope
 and per-bridge migration acceptance. Historical decisions above remain as recorded.
